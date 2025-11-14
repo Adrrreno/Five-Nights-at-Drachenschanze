@@ -48,7 +48,7 @@ STATIC_FRAMES = []
 STATIC_FRAME_INDEX = 0
 STATIC_FRAME_TIMER = 0.0
 office_locked = False  # prevents others from entering after jumpscare starts
-REC_FONT = pygame.font.Font("FNBD/assets/fonts/pixel_font.ttf", 28)
+REC_FONT = pygame.font.Font("/assets/fonts/pixel_font.ttf", 28)
 rec_flash_timer = 0.0
 rec_visible = True
 
@@ -70,10 +70,10 @@ SCANLINE_OVERLAY = create_scanline_surface(WIDTH, HEIGHT)
 
 
 # --- Office sprites ---
-OFFICE_BASE = pygame.image.load("FNBD/assets/rooms/Office/office_base.png").convert()
+OFFICE_BASE = pygame.image.load("/assets/rooms/Office/office_base.png").convert()
 OFFICE_BASE = pygame.transform.smoothscale(OFFICE_BASE, (1920, 1080))
 
-DOOR_CLOSED_IMG = pygame.image.load("FNBD/assets/rooms/Office/door_left_closed.png").convert_alpha()
+DOOR_CLOSED_IMG = pygame.image.load("/assets/rooms/Office/door_left_closed.png").convert_alpha()
 DOOR_CLOSED_IMG = pygame.transform.smoothscale(DOOR_CLOSED_IMG, (1920, 1080))
 
 
@@ -114,20 +114,20 @@ def safe_load_sound(path):
         return None
 
 # Load sounds
-JUMPSCARE_SOUND = safe_load_sound("FNBD/assets/sounds/jumpscare.wav")
-BACKGROUND_LOOP = safe_load_sound("FNBD/assets/sounds/background_loop.wav")
-CAMERA_SWITCH_SOUND = safe_load_sound("FNBD/assets/sounds/cam_select.wav")
-DOOR_CLOSE_SOUND = safe_load_sound("FNBD/assets/sounds/door_close.wav")
-DOOR_OPEN_SOUND = safe_load_sound("FNBD/assets/sounds/door_open.wav")
+JUMPSCARE_SOUND = safe_load_sound("/assets/sounds/jumpscare.wav")
+BACKGROUND_LOOP = safe_load_sound("/assets/sounds/background_loop.wav")
+CAMERA_SWITCH_SOUND = safe_load_sound("/assets/sounds/cam_select.wav")
+DOOR_CLOSE_SOUND = safe_load_sound("/assets/sounds/door_close.wav")
+DOOR_OPEN_SOUND = safe_load_sound("/assets/sounds/door_open.wav")
 
 # Jumpscare video
-RAINER_JUMPSCARE_VIDEO_PATH = "FNBD/assets/jumpscares/rainer_jumpscare.mp4"
+RAINER_JUMPSCARE_VIDEO_PATH = "/assets/jumpscares/rainer_jumpscare.mp4"
 
 
 # --- Ambient sounds ---
 AMBIENT_SOUNDS = []
 for i in range(1, 10):  # assuming ambient1.wav ... ambient9.wav
-    path = f"FNBD/assets/sounds/schnaufer_winkler{i}.wav"
+    path = f"/assets/sounds/schnaufer_winkler{i}.wav"
     sound = safe_load_sound(path)
     if sound:
         AMBIENT_SOUNDS.append(sound)
@@ -136,7 +136,7 @@ if AMBIENT_SOUNDS:
     print(f"[INFO] Loaded {len(AMBIENT_SOUNDS)} ambient sound(s).")
 
 
-STATIC_FRAMES = load_gif_frames("FNBD/assets/effects/static.gif")
+STATIC_FRAMES = load_gif_frames("/assets/effects/static.gif")
 STATIC_FRAME_INDEX = 0
 STATIC_FRAME_TIMER = 0.0
 
@@ -166,32 +166,32 @@ def safe_load_image(path, size=(320, 240)):
 ROOMS = {
     "Stage": Room(
         "Stage",
-        safe_load_image("FNBD/assets/rooms/stage.png", (320, 240)),
+        safe_load_image("/assets/rooms/stage.png", (320, 240)),
         waypoints=[(160, 30), (160, 210)]
     ),
     "Hall": Room(
         "Hall",
-        safe_load_image("FNBD/assets/rooms/hall.png", (320, 240)),
+        safe_load_image("/assets/rooms/hall.png", (320, 240)),
         waypoints=[(50, 50), (250, 180)]
     ),
     "Kitchen": Room(
         "Kitchen",
-        safe_load_image("FNBD/assets/rooms/kitchen.png", (320, 240)),
+        safe_load_image("/assets/rooms/kitchen.png", (320, 240)),
         waypoints=[(30, 30), (280, 200)]
     ),
     "HallCorner": Room(
         "HallCorner",
-        safe_load_image("FNBD/assets/rooms/hallcorner.png", (320, 240)),
+        safe_load_image("/assets/rooms/hallcorner.png", (320, 240)),
         waypoints=[(60, 60), (260, 180)]
     ),
     "Backroom": Room(
         "Backroom",
-        safe_load_image("FNBD/assets/rooms/backroom.png", (320, 240)),
+        safe_load_image("/assets/rooms/backroom.png", (320, 240)),
         waypoints=[(100, 100), (220, 160)]
     ),
     "Office": Room(
         "Office",
-        safe_load_image("FNBD/assets/rooms/office.png", (320, 240)),
+        safe_load_image("/assets/rooms/office.png", (320, 240)),
         waypoints=[(0, 0)]
     ),
 }
@@ -250,154 +250,11 @@ POWER_DRAIN_CAMERA = 0.015    # per frame when viewing cameras
 POWER_DRAIN_DOOR = 0.03       # per frame per closed door
 
 for name, route in ANIMATRONIC_PATHS.items():
-    base_dir = f"FNBD/assets/animatronics/{name}/"
+    base_dir = f"/assets/animatronics/{name}/"
     missing = [room for room in route if not os.path.exists(f"{base_dir}{room}.png")]
     if missing:
         print(f"[DEBUG] Missing PNGs for {name}: {missing}")
 
-
-
-"""
-# ----- Animatronic class -----
-class Animatronic:
-    def __init__(self, name, start_room):
-        self.name = name
-        self.route = route
-        self.route_index = 0
-        self.current_room = start_room
-        self.pos = list(random.choice(ROOMS[start_room].waypoints))
-        self.waypoint_index = 0
-        self.speed = 60
-        self.state = "patrol"
-        self.move_timer = random.uniform(5.0, 10.0)
-        self.aggression = 1.0
-        self.attack_timer = 0.0
-        self.target_room = None
-        self.visible = True
-        self.transitioning = False
-        self.transition_progress = 0.0
-        self.transition_target = None
-        self.transition_duration = 0.0
-
-
-    def update(self, dt):
-        #Update AI behavior: timed movement, state logic, aggression scaling.
-        # Increase aggression slowly as the night goes on
-        self.aggression = min(self.aggression + dt * 0.02, 3.0)
-
-        # --- Handle transition movement between rooms ---
-        if self.transitioning:
-            self.transition_progress += dt / self.transition_duration
-            if self.transition_progress >= 1.0:
-                # Finished moving into new room
-                self.transitioning = False
-                self.current_room = self.transition_target
-                self.pos = list(random.choice(ROOMS[self.current_room].waypoints))
-                self.transition_target = None
-
-                # If they entered Office — trigger attack check
-                if self.current_room == PLAYER_ROOM:
-                    if not is_door_closed_between("Hall", "Office") or power <= 0:
-                        self.state = "attack"
-                        self.attack_timer = 0.0
-                    else:
-                        self.state = "patrol"
-            return  # skip rest of update while transitioning
-
-        # --- Normal patrol logic ---
-        self.move_timer -= dt
-
-        if self.state == "patrol":
-            self.patrol(dt)
-            if self.move_timer <= 0:
-                self.try_move()
-                self.move_timer = random.uniform(5.0 / self.aggression, 10.0 / self.aggression)
-
-        elif self.state == "attack":
-            # Wait a bit before jumpscare to simulate hesitation at door
-            self.attack_timer += dt
-            if self.attack_timer > 3.0:
-                self.state = "jumpscare"
-
-
-
-    def patrol(self, dt):
-        room = ROOMS[self.current_room]
-        if not room.waypoints:
-            return
-        target = room.waypoints[self.waypoint_index]
-        dx = target[0] - self.pos[0]
-        dy = target[1] - self.pos[1]
-        dist = (dx*dx + dy*dy) ** 0.5
-        if dist < 4:
-            # next waypoint
-            self.waypoint_index = (self.waypoint_index + 1) % len(room.waypoints)
-            return
-        # move
-        vx = (dx/dist) * self.speed
-        vy = (dy/dist) * self.speed
-        self.pos[0] += vx * dt
-        self.pos[1] += vy * dt
-
-    def try_move(self):
-        #Start a smooth transition along a fixed route.
-        if self.name not in ANIMATRONIC_PATHS:
-            return
-
-        route = ANIMATRONIC_PATHS[self.name]
-        if self.current_room not in route:
-            self.current_room = route[0]
-            return
-
-        current_index = route.index(self.current_room)
-        if current_index < len(route) - 1:
-            next_room = route[current_index + 1]
-        else:
-            next_room = route[0]
-
-        # Prevent new move if already transitioning
-        if self.transitioning:
-            return
-
-        move_chance = 0.25 * self.aggression
-        if random.random() < move_chance:
-            # Start a gradual move between rooms
-            self.transitioning = True
-            self.transition_target = next_room
-            self.transition_progress = 0.0
-            self.transition_duration = random.uniform(3.0, 7.0) / self.aggression  # seconds
-            print(f"{self.name} starting transition {self.current_room} → {next_room}")
-
-
-
-
-
-    def move_to_room(self, room_name):
-        #Simplified teleport movement for FNaF-like transitions.
-        # Only move if connected by ROOM_CONNECTIONS
-        if room_name not in ROOM_CONNECTIONS.get(self.current_room, []):
-            return  # skip illegal jumps
-
-        self.current_room = room_name
-        self.pos = list(random.choice(ROOMS[room_name].waypoints))
-        self.waypoint_index = 0
-
-        # Entering Office triggers attack logic
-        if room_name == "Office":
-            if not is_door_closed_between("Hall", "Office") or power <= 0:
-                self.state = "attack"
-                self.attack_timer = 0.0
-        else:
-            self.state = "patrol"
-
-
-
-
-    def draw_on_surface(self, surf):
-        # draw the anim sprite relative to surface
-        surf.blit(ANIM_IMG, (int(self.pos[0]) - 24, int(self.pos[1]) - 24))
-
-"""
 class Animatronic:
     def __init__(self, name, start_room, route=None):
         self.name = name
@@ -437,7 +294,7 @@ class Animatronic:
     def load_room_images(self, name):
         """Load per-room images for this animatronic."""
         images = {}
-        base_path = f"FNBD/assets/animatronics/{name}/"
+        base_path = f"/assets/animatronics/{name}/"
         for room in CAMERA_ORDER:
             path = os.path.join(base_path, f"{room.lower()}.png")
             if os.path.exists(path):
@@ -688,9 +545,9 @@ start_ticks = pygame.time.get_ticks()
 
 # ----- Helper UI -----
 def draw_ui():
-    """Draw FNaF-style status UI (night timer, door status, power)."""
+    """Draw status UI (night timer, door status, power)."""
     try:
-        ui_font = pygame.font.Font("FNBD/assets/fonts/pixel_font.ttf", 26)
+        ui_font = pygame.font.Font("/assets/fonts/pixel_font.ttf", 26)
     except:
         ui_font = FONT  # fallback if pixel font missing
 
@@ -869,13 +726,13 @@ def drain_power(dt, camera_on):
 def main_menu():
     """Display the main menu with Start, Controls, and Quit buttons, including static background."""
     # --- Load background music ---
-    menu_music = safe_load_sound("FNBD/assets/sounds/menu_theme.wav")
+    menu_music = safe_load_sound("/assets/sounds/menu_theme.wav")
     if menu_music:
         menu_music.set_volume(0.5)
         menu_music.play(-1)
 
-    title_font = pygame.font.Font("FNBD/assets/fonts/pixel_font.ttf", 64)
-    button_font = pygame.font.Font("FNBD/assets/fonts/pixel_font.ttf", 28)
+    title_font = pygame.font.Font("/assets/fonts/pixel_font.ttf", 64)
+    button_font = pygame.font.Font("/assets/fonts/pixel_font.ttf", 28)
 
     # Ensure STATIC_FRAMES exist and are scaled to screen
     if not STATIC_FRAMES:
@@ -899,7 +756,7 @@ def main_menu():
 
     # --- Rainer flash (kept minimal) ---
     try:
-        rainer_img = pygame.image.load("FNBD/assets/images/rainer_flash.png").convert_alpha()
+        rainer_img = pygame.image.load("/assets/images/rainer_flash.png").convert_alpha()
         rainer_img = pygame.transform.scale(rainer_img, (WIDTH, HEIGHT))
     except Exception:
         rainer_img = None
@@ -987,7 +844,7 @@ def main_menu():
         header = title_font.render("Controls & Info", True, flicker_color)
         SCREEN.blit(header, (WIDTH // 2 - header.get_width() // 2, 120))
 
-        info_font = pygame.font.Font("FNBD/assets/fonts/pixel_font.ttf", 32)
+        info_font = pygame.font.Font("/assets/fonts/pixel_font.ttf", 32)
         lines = [
             "1-6 : Switch cameras",
             "D   : Toggle office door",
@@ -1090,7 +947,7 @@ def main_menu():
 def show_night_intro(screen, text="Night 1", duration=3.0):
     """Displays 'Night X' text with fade in/out transition before gameplay."""
     clock = pygame.time.Clock()
-    font = pygame.font.SysFont("FNBD/assets/fonts/pixel_font.ttf", 80)
+    font = pygame.font.SysFont("/assets/fonts/pixel_font.ttf", 80)
     label = font.render(text, True, (255, 255, 255))
 
     fade_surface = pygame.Surface((WIDTH, HEIGHT))
@@ -1179,7 +1036,7 @@ def main():
     CAM_BAR_COLOR = (10, 10, 10)
     CAM_BAR_ACTIVE_COLOR = (30, 30, 30)
     CAM_BAR_TEXT_COLOR = (200, 255, 200)
-    CAM_BAR_FONT = pygame.font.Font("FNBD/assets/fonts/pixel_font.ttf", 28)
+    CAM_BAR_FONT = pygame.font.Font("/assets/fonts/pixel_font.ttf", 28)
     cam_hovered = False
     camera_bar_y = HEIGHT - 20          # current Y position of the hover bar
     camera_bar_target_y = HEIGHT - 20   # target Y (moves smoothly)
@@ -1548,14 +1405,14 @@ def main():
                 rec_visible = not rec_visible
 
             if rec_visible:
-                rec_font = pygame.font.Font("FNBD/assets/fonts/pixel_font.ttf", 28)
+                rec_font = pygame.font.Font("/assets/fonts/pixel_font.ttf", 28)
                 rec_text = rec_font.render("REC", True, (255, 40, 40))
                 surface.blit(rec_text, (50, 40))
                 pygame.draw.circle(surface, (255, 0, 0), (130, 50), 8)
 
             # --- Booting effect (signal lost) ---
             if booting:
-                signal_font = pygame.font.Font("FNBD/assets/fonts/pixel_font.ttf", 38)
+                signal_font = pygame.font.Font("/assets/fonts/pixel_font.ttf", 38)
                 signal_label = signal_font.render("SIGNAL LOST", True, (255, 255, 255))
                 surface.blit(signal_label, (WIDTH//2 - signal_label.get_width()//2,
                                             HEIGHT//2 - signal_label.get_height()//2))
