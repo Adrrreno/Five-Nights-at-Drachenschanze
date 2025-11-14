@@ -7,6 +7,8 @@ import os
 from moviepy.editor import VideoFileClip
 from PIL import Image
 
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 # --- Compatibility patch for Pillow >= 10 ---
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.LANCZOS
@@ -48,7 +50,7 @@ STATIC_FRAMES = []
 STATIC_FRAME_INDEX = 0
 STATIC_FRAME_TIMER = 0.0
 office_locked = False  # prevents others from entering after jumpscare starts
-REC_FONT = pygame.font.Font("/assets/fonts/pixel_font.ttf", 28)
+REC_FONT = pygame.font.Font("../assets/fonts/pixel_font.ttf", 28)
 rec_flash_timer = 0.0
 rec_visible = True
 
@@ -70,10 +72,10 @@ SCANLINE_OVERLAY = create_scanline_surface(WIDTH, HEIGHT)
 
 
 # --- Office sprites ---
-OFFICE_BASE = pygame.image.load("/assets/rooms/Office/office_base.png").convert()
+OFFICE_BASE = pygame.image.load("../assets/rooms/Office/office_base.png").convert()
 OFFICE_BASE = pygame.transform.smoothscale(OFFICE_BASE, (1920, 1080))
 
-DOOR_CLOSED_IMG = pygame.image.load("/assets/rooms/Office/door_left_closed.png").convert_alpha()
+DOOR_CLOSED_IMG = pygame.image.load("../assets/rooms/Office/door_left_closed.png").convert_alpha()
 DOOR_CLOSED_IMG = pygame.transform.smoothscale(DOOR_CLOSED_IMG, (1920, 1080))
 
 
@@ -114,20 +116,20 @@ def safe_load_sound(path):
         return None
 
 # Load sounds
-JUMPSCARE_SOUND = safe_load_sound("/assets/sounds/jumpscare.wav")
-BACKGROUND_LOOP = safe_load_sound("/assets/sounds/background_loop.wav")
-CAMERA_SWITCH_SOUND = safe_load_sound("/assets/sounds/cam_select.wav")
-DOOR_CLOSE_SOUND = safe_load_sound("/assets/sounds/door_close.wav")
-DOOR_OPEN_SOUND = safe_load_sound("/assets/sounds/door_open.wav")
+JUMPSCARE_SOUND = safe_load_sound("../assets/sounds/jumpscare.wav")
+BACKGROUND_LOOP = safe_load_sound("../assets/sounds/background_loop.wav")
+CAMERA_SWITCH_SOUND = safe_load_sound("../assets/sounds/cam_select.wav")
+DOOR_CLOSE_SOUND = safe_load_sound("../assets/sounds/door_close.wav")
+DOOR_OPEN_SOUND = safe_load_sound("../assets/sounds/door_open.wav")
 
 # Jumpscare video
-RAINER_JUMPSCARE_VIDEO_PATH = "/assets/jumpscares/rainer_jumpscare.mp4"
+RAINER_JUMPSCARE_VIDEO_PATH = "../assets/jumpscares/rainer_jumpscare.mp4"
 
 
 # --- Ambient sounds ---
 AMBIENT_SOUNDS = []
 for i in range(1, 10):  # assuming ambient1.wav ... ambient9.wav
-    path = f"/assets/sounds/schnaufer_winkler{i}.wav"
+    path = f"../assets/sounds/schnaufer_winkler{i}.wav"
     sound = safe_load_sound(path)
     if sound:
         AMBIENT_SOUNDS.append(sound)
@@ -136,7 +138,7 @@ if AMBIENT_SOUNDS:
     print(f"[INFO] Loaded {len(AMBIENT_SOUNDS)} ambient sound(s).")
 
 
-STATIC_FRAMES = load_gif_frames("/assets/effects/static.gif")
+STATIC_FRAMES = load_gif_frames("../assets/effects/static.gif")
 STATIC_FRAME_INDEX = 0
 STATIC_FRAME_TIMER = 0.0
 
@@ -166,32 +168,32 @@ def safe_load_image(path, size=(320, 240)):
 ROOMS = {
     "Stage": Room(
         "Stage",
-        safe_load_image("/assets/rooms/stage.png", (320, 240)),
+        safe_load_image("../assets/rooms/stage.png", (320, 240)),
         waypoints=[(160, 30), (160, 210)]
     ),
     "Hall": Room(
         "Hall",
-        safe_load_image("/assets/rooms/hall.png", (320, 240)),
+        safe_load_image("../assets/rooms/hall.png", (320, 240)),
         waypoints=[(50, 50), (250, 180)]
     ),
     "Kitchen": Room(
         "Kitchen",
-        safe_load_image("/assets/rooms/kitchen.png", (320, 240)),
+        safe_load_image("../assets/rooms/kitchen.png", (320, 240)),
         waypoints=[(30, 30), (280, 200)]
     ),
     "HallCorner": Room(
         "HallCorner",
-        safe_load_image("/assets/rooms/hallcorner.png", (320, 240)),
+        safe_load_image("../assets/rooms/hallcorner.png", (320, 240)),
         waypoints=[(60, 60), (260, 180)]
     ),
     "Backroom": Room(
         "Backroom",
-        safe_load_image("/assets/rooms/backroom.png", (320, 240)),
+        safe_load_image("../assets/rooms/backroom.png", (320, 240)),
         waypoints=[(100, 100), (220, 160)]
     ),
     "Office": Room(
         "Office",
-        safe_load_image("/assets/rooms/office.png", (320, 240)),
+        safe_load_image("../assets/rooms/office.png", (320, 240)),
         waypoints=[(0, 0)]
     ),
 }
@@ -250,10 +252,12 @@ POWER_DRAIN_CAMERA = 0.015    # per frame when viewing cameras
 POWER_DRAIN_DOOR = 0.03       # per frame per closed door
 
 for name, route in ANIMATRONIC_PATHS.items():
-    base_dir = f"/assets/animatronics/{name}/"
+    base_dir = f"../assets/animatronics/{name}/"
     missing = [room for room in route if not os.path.exists(f"{base_dir}{room}.png")]
     if missing:
         print(f"[DEBUG] Missing PNGs for {name}: {missing}")
+
+
 
 class Animatronic:
     def __init__(self, name, start_room, route=None):
@@ -294,7 +298,7 @@ class Animatronic:
     def load_room_images(self, name):
         """Load per-room images for this animatronic."""
         images = {}
-        base_path = f"/assets/animatronics/{name}/"
+        base_path = f"../assets/animatronics/{name}/"
         for room in CAMERA_ORDER:
             path = os.path.join(base_path, f"{room.lower()}.png")
             if os.path.exists(path):
@@ -500,7 +504,7 @@ class Animatronic:
             return self._room_images[self.current_room]
 
         # Build normalized path: FNBD/assets/animatronics/Rainer/Backroom.png
-        folder = os.path.join("FNBD", "assets", "animatronics", self.name)
+        folder = os.path.join("..", "assets", "animatronics", self.name)
         filename = f"{self.current_room}.png"
         path = os.path.join(folder, filename)
         path = path.replace("\\", "/")  # normalize for pygame compatibility
@@ -545,9 +549,9 @@ start_ticks = pygame.time.get_ticks()
 
 # ----- Helper UI -----
 def draw_ui():
-    """Draw status UI (night timer, door status, power)."""
+    """Draw FNaF-style status UI (night timer, door status, power)."""
     try:
-        ui_font = pygame.font.Font("/assets/fonts/pixel_font.ttf", 26)
+        ui_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 26)
     except:
         ui_font = FONT  # fallback if pixel font missing
 
@@ -726,13 +730,13 @@ def drain_power(dt, camera_on):
 def main_menu():
     """Display the main menu with Start, Controls, and Quit buttons, including static background."""
     # --- Load background music ---
-    menu_music = safe_load_sound("/assets/sounds/menu_theme.wav")
+    menu_music = safe_load_sound("../assets/sounds/menu_theme.wav")
     if menu_music:
         menu_music.set_volume(0.5)
         menu_music.play(-1)
 
-    title_font = pygame.font.Font("/assets/fonts/pixel_font.ttf", 64)
-    button_font = pygame.font.Font("/assets/fonts/pixel_font.ttf", 28)
+    title_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 64)
+    button_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 28)
 
     # Ensure STATIC_FRAMES exist and are scaled to screen
     if not STATIC_FRAMES:
@@ -756,7 +760,7 @@ def main_menu():
 
     # --- Rainer flash (kept minimal) ---
     try:
-        rainer_img = pygame.image.load("/assets/images/rainer_flash.png").convert_alpha()
+        rainer_img = pygame.image.load("../assets/images/rainer_flash.png").convert_alpha()
         rainer_img = pygame.transform.scale(rainer_img, (WIDTH, HEIGHT))
     except Exception:
         rainer_img = None
@@ -844,7 +848,7 @@ def main_menu():
         header = title_font.render("Controls & Info", True, flicker_color)
         SCREEN.blit(header, (WIDTH // 2 - header.get_width() // 2, 120))
 
-        info_font = pygame.font.Font("/assets/fonts/pixel_font.ttf", 32)
+        info_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 32)
         lines = [
             "1-6 : Switch cameras",
             "D   : Toggle office door",
@@ -947,7 +951,7 @@ def main_menu():
 def show_night_intro(screen, text="Night 1", duration=3.0):
     """Displays 'Night X' text with fade in/out transition before gameplay."""
     clock = pygame.time.Clock()
-    font = pygame.font.SysFont("/assets/fonts/pixel_font.ttf", 80)
+    font = pygame.font.SysFont("../assets/fonts/pixel_font.ttf", 80)
     label = font.render(text, True, (255, 255, 255))
 
     fade_surface = pygame.Surface((WIDTH, HEIGHT))
@@ -1036,7 +1040,7 @@ def main():
     CAM_BAR_COLOR = (10, 10, 10)
     CAM_BAR_ACTIVE_COLOR = (30, 30, 30)
     CAM_BAR_TEXT_COLOR = (200, 255, 200)
-    CAM_BAR_FONT = pygame.font.Font("/assets/fonts/pixel_font.ttf", 28)
+    CAM_BAR_FONT = pygame.font.Font("../assets/fonts/pixel_font.ttf", 28)
     cam_hovered = False
     camera_bar_y = HEIGHT - 20          # current Y position of the hover bar
     camera_bar_target_y = HEIGHT - 20   # target Y (moves smoothly)
@@ -1405,14 +1409,14 @@ def main():
                 rec_visible = not rec_visible
 
             if rec_visible:
-                rec_font = pygame.font.Font("/assets/fonts/pixel_font.ttf", 28)
+                rec_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 28)
                 rec_text = rec_font.render("REC", True, (255, 40, 40))
                 surface.blit(rec_text, (50, 40))
                 pygame.draw.circle(surface, (255, 0, 0), (130, 50), 8)
 
             # --- Booting effect (signal lost) ---
             if booting:
-                signal_font = pygame.font.Font("/assets/fonts/pixel_font.ttf", 38)
+                signal_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 38)
                 signal_label = signal_font.render("SIGNAL LOST", True, (255, 255, 255))
                 surface.blit(signal_label, (WIDTH//2 - signal_label.get_width()//2,
                                             HEIGHT//2 - signal_label.get_height()//2))
@@ -1463,3 +1467,4 @@ if __name__ == "__main__":
     main_menu()
     show_night_intro(SCREEN, "Night 1")
     main()
+
