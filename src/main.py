@@ -13,6 +13,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.LANCZOS
 
+click_once = False
 
 pygame.init()
 pygame.mixer.init()
@@ -20,7 +21,7 @@ WIDTH, HEIGHT = 1920, 1080
 SCREEN = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Fünf Nächte beim Drachen")
 
-
+last_mouse_pressed = False
 
 CLOCK = pygame.time.Clock()
 FONT = pygame.font.SysFont("Arial", 20)
@@ -593,78 +594,139 @@ def draw_ui():
 
 
 def draw_camera_hover_bar(screen, mouse_y, dt):
-    """
-    FNaF-style hover bar (solid behavior):
-    - Opens when hovering near bottom
-    - Closes only when clearly moved up
-    - Has cooldown to prevent double toggles
-    """
     global camera_active, camera_bar_y, camera_bar_target_y
-    global cam_show_timer, static_target_alpha, cam_toggle_cooldown
+    global last_hover_state, cam_toggle_cooldown, static_target_alpha
 
     bar_height = 80
-    open_zone = 140
-    close_zone = 240
-    open_delay = 0.25
-    close_delay = 0.4
-    toggle_cooldown = 0.6  # seconds before another toggle can happen
+    hover_zone = HEIGHT - 120        # The hover area
+    toggle_cooldown_time = 0.4       # Prevent double triggers
 
-    # --- Initialize cooldown timer if not present ---
+    # initialize missing globals
+    if "last_hover_state" not in globals():
+        last_hover_state = False
     if "cam_toggle_cooldown" not in globals():
         cam_toggle_cooldown = 0.0
 
-    # --- Update cooldown timer ---
+    # update cooldown
     if cam_toggle_cooldown > 0:
         cam_toggle_cooldown -= dt
 
-    # --- Determine hover state (with hysteresis) ---
-    if not camera_active:
-        hovering = mouse_y >= HEIGHT - open_zone
-    else:
-        hovering = mouse_y >= HEIGHT - close_zone
+    # detect hover
+    hovering = mouse_y >= hover_zone
 
-    # --- Opening behavior ---
-    if hovering and not camera_active and cam_toggle_cooldown <= 0:
-        cam_show_timer += dt
-        if cam_show_timer >= open_delay:
-            camera_active = True
+    # --- FNaF toggle logic ---
+    if hovering and not last_hover_state and cam_toggle_cooldown <= 0:
+        # mouse ENTERED the bar → toggle camera
+        camera_active = not camera_active
+        cam_toggle_cooldown = toggle_cooldown_time
+
+        if camera_active:
             static_target_alpha = 120
-            cam_toggle_cooldown = toggle_cooldown
-            print("[CAM] Monitor opened by hover")
-    # --- Closing behavior ---
-    elif not hovering and camera_active and cam_toggle_cooldown <= 0:
-        cam_show_timer -= dt
-        cam_show_timer = max(cam_show_timer, 0)
-        if cam_show_timer == 0:
-            camera_active = False
+            print("[CAM] Monitor OPENED")
+        else:
             static_target_alpha = 0
-            cam_toggle_cooldown = toggle_cooldown
-            print("[CAM] Monitor closed by leaving hover area")
+            print("[CAM] Monitor CLOSED")
 
-    # --- Animate sliding motion ---
+    # update last state
+    last_hover_state = hovering
+
+    # slide animation
     camera_bar_target_y = HEIGHT - (bar_height if camera_active else 20)
     camera_bar_y += (camera_bar_target_y - camera_bar_y) * min(dt * 10, 1)
 
-    # --- Draw bar background ---
+    # draw bar background
     bar_rect = pygame.Rect(0, camera_bar_y, WIDTH, bar_height)
     pygame.draw.rect(screen, (25, 25, 25), bar_rect)
 
-    # --- Draw arrow indicator ---
-    arrow_y = camera_bar_y + bar_height // 3
-    arrow_color = (255, 80, 80) if camera_active else (200, 200, 200)
+    # draw arrow
+    arrow_y = camera_bar_y + 25
+    arrow_color = (255, 80, 80) if camera_active else (220, 220, 220)
     pygame.draw.polygon(screen, arrow_color, [
         (WIDTH // 2 - 35, arrow_y + 20),
         (WIDTH // 2 + 35, arrow_y + 20),
         (WIDTH // 2, arrow_y)
     ])
 
-    # --- Glow when hovering ---
+    # glow on hover
     if hovering:
         glow = pygame.Surface((WIDTH, bar_height), pygame.SRCALPHA)
-        glow.fill((255, 255, 255, 25))
+        glow.fill((255, 255, 255, 20))
         screen.blit(glow, (0, camera_bar_y))
 
 
+def draw_camera_side_panel(surface, active):
+    global CAM_BUTTON_RECTS
+
+    CAM_BUTTON_RECTS = []   # <-- reset every frame
+
+    if not active:
+        return
+
+    panel_width = 180
+    panel_x = WIDTH - panel_width
+    panel_y = 120
+    button_height = 70
+    spacing = 10
+
+    # Panel background
+    panel = pygame.Surface((panel_width, HEIGHT - panel_y - 50), pygame.SRCALPHA)
+    panel.fill((0, 0, 0, 80))
+    surface.blit(panel, (panel_x, panel_y))
+
+    # Title
+    title_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 32)
+    title = title_font.render("CAMERAS", True, (200, 200, 200))
+    surface.blit(title, (panel_x + 25, panel_y - 50))
+
+    btn_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 36)
+
+    mx, my = pygame.mouse.get_pos()
+
+    # Create & draw camera buttons
+    for i, cam_name in enumerate(VIEWABLE_CAMERAS[:5]):
+        y = panel_y + i * (button_height + spacing)
+
+        rect = pygame.Rect(panel_x + 20, y, panel_width - 40, button_height)
+
+        hovered = rect.collidepoint(mx, my)
+        active_cam = (CAMERA_ORDER[camera_index] == cam_name)
+
+        # Colors
+        if active_cam:
+            color = (180, 40, 40)
+        elif hovered:
+            color = (150, 150, 150)
+        else:
+            color = (90, 90, 90)
+
+        pygame.draw.rect(surface, color, rect, border_radius=8)
+        pygame.draw.rect(surface, (20, 20, 20), rect, 3, border_radius=8)
+
+        label = btn_font.render(str(i + 1), True, (250, 250, 250))
+        surface.blit(label, (
+            rect.centerx - label.get_width() // 2,
+            rect.centery - label.get_height() // 2
+        ))
+
+        CAM_BUTTON_RECTS.append((rect, cam_name))
+
+
+def mouse_in_camera_ui(mx, my):
+    """Returns True if mouse is over any camera UI that should NOT close the cams."""
+    # Bottom hover bar
+    if my >= HEIGHT - 80:
+        return True
+
+    # Right-side camera panel
+    panel_width = 180
+    panel_x = WIDTH - panel_width
+    panel_y = 120
+    panel_height = HEIGHT - panel_y - 50
+
+    if panel_x <= mx <= WIDTH and panel_y <= my <= panel_y + panel_height:
+        return True
+
+    return False
 
 
 def handle_camera_switch(key):
@@ -1008,8 +1070,7 @@ pygame.mixer.music.set_volume(1.0)
 
 # ----- Main loop -----
 def main():
-    global game_over, camera_bar_y, camera_bar_target_y, jumpscare_time, night_timer, camera_index, power, camera_active, camera_button_rect, STATIC_OVERLAY, cam_show_timer, STATIC_FRAME_TIMER, STATIC_FRAME_INDEX, static_alpha, static_target_alpha, jumpscare_active, office_locked, fade, CAM_BAR_ACTIVE_COLOR, CAM_BAR_COLOR, CAM_BAR_FONT, CAM_BAR_HEIGHT, CAM_BAR_TEXT_COLOR, cam_hovered
-
+    global game_over, camera_bar_y, click_once, camera_bar_target_y, jumpscare_time,night_timer, camera_index, power, cam_toggle_cooldown, camera_active, camera_button_rect, STATIC_OVERLAY, cam_show_timer, STATIC_FRAME_TIMER, STATIC_FRAME_INDEX, static_alpha, static_target_alpha, jumpscare_active, office_locked, fade, CAM_BAR_ACTIVE_COLOR, CAM_BAR_COLOR, CAM_BAR_FONT, CAM_BAR_HEIGHT, CAM_BAR_TEXT_COLOR, cam_hovered
     running = True
     last_time = pygame.time.get_ticks()
     flicker_timer = 0.0
@@ -1026,6 +1087,7 @@ def main():
     animatronics = [rainer, fliege]
     camera_booting = False
     camera_boot_timer = 0.0
+    cam_toggle_cooldown = 0.0
     current_camera_name = "1A"
     animatronics = [rainer, fliege]
     # --- Initialize Animatronics ---
@@ -1155,6 +1217,8 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                click_once = True
 
             elif event.type == pygame.KEYDOWN:
                 handle_camera_switch(event.key)
@@ -1173,8 +1237,8 @@ def main():
                         print("Door Open")
                         if DOOR_OPEN_SOUND:
                             DOOR_OPEN_SOUND.play()
-
-
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                mx, my = event.pos
 
                 if camera_active:
                     print("Camera system activated")
@@ -1272,7 +1336,21 @@ def main():
         elif static_alpha > static_target_alpha:
             static_alpha = max(static_alpha - static_fade_speed * dt, static_target_alpha)
 
+        click_once = False
 
+        if camera_active and click_once:
+            mx, my = pygame.mouse.get_pos()
+
+            for rect, cam_name in CAM_BUTTON_RECTS:
+                if rect.collidepoint(mx, my):
+                    camera_index = CAMERA_ORDER.index(cam_name)
+                    current_camera_name = cam_name
+                    print(f"[CAM] Switched to {cam_name}")
+
+                    if CAMERA_SWITCH_SOUND:
+                        CAMERA_SWITCH_SOUND.play()
+
+                    break
 
         # draw ....................................................................................................................................
         SCREEN.fill((10,10,10))
@@ -1293,9 +1371,8 @@ def main():
             # --- Draw the camera feed ---
             big_room = ROOMS[CAMERA_ORDER[camera_index]]
             big_view = big_room.view_surface.copy()
+            draw_camera_side_panel(SCREEN, camera_active)
 
-            # draw animatronics visible in this camera
-            # draw animatronic camera PNGs (static, FNaF-style)
             # --- Draw animatronic image for the current camera (once per frame) ---
             drawn_rooms = set()
             for a in animatronics:
@@ -1467,4 +1544,3 @@ if __name__ == "__main__":
     main_menu()
     show_night_intro(SCREEN, "Night 1")
     main()
-
