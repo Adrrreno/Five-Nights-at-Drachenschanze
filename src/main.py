@@ -13,6 +13,14 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.LANCZOS
 
+
+
+# --- Camera Map Clickable Buttons ---
+CAM_MAP_RECTS = []   # list of (pygame.Rect, cam_name)
+MAP_UI_RECT = None   # button in camera UI that opens map
+MAP_CLOSE_RECT = None  # button inside map that closes map
+
+
 click_once = False
 
 pygame.init()
@@ -54,6 +62,18 @@ office_locked = False  # prevents others from entering after jumpscare starts
 REC_FONT = pygame.font.Font("../assets/fonts/pixel_font.ttf", 28)
 rec_flash_timer = 0.0
 rec_visible = True
+
+# --- Camera Map Button Positions (editable) ---
+# These are placeholders — you will adjust them after seeing the map in-game.
+CAM_MAP_BUTTON_POS = {
+    "Stage":      {"pos": (800, 270), "layer": 0},  
+    "Kitchen":    {"pos": (120, 200), "layer": 1},  
+    "Hall":       {"pos": (560, 360), "layer": 0},  
+    "Backroom":   {"pos": (660, 120), "layer": 0},  
+    "HallCorner": {"pos": (490, 650), "layer": 1},  
+}
+
+
 
 
 # --- Flicker effect control ---
@@ -163,6 +183,13 @@ def safe_load_image(path, size=(320, 240)):
     except Exception as e:
         print(f"[ERROR] Could not load {path}: {e}")
         return load_placeholder_surface("Error", size)
+
+MAP_TOP = pygame.image.load("../assets/ui/map_top.png").convert_alpha()
+MAP_BOTTOM = pygame.image.load("../assets/ui/map_bottom.png").convert_alpha()
+
+# scale to tablet size (same as camera screen)
+MAP_TOP = pygame.transform.scale(MAP_TOP, (1280, 720))
+MAP_BOTTOM = pygame.transform.scale(MAP_BOTTOM, (1280, 720))
 
 
 # ----- Room Definitions -----
@@ -540,6 +567,188 @@ animatronics = [
 ]
 
 
+def draw_map_buttons(surface, x, y):
+    global map_layer
+
+    btn_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 32)
+
+    btn_top = pygame.Rect(x, y, 180, 50)
+    btn_bottom = pygame.Rect(x + 200, y, 220, 50)
+
+    mx, my = pygame.mouse.get_pos()
+    click = pygame.mouse.get_pressed()[0]
+
+    # TOP button
+    pygame.draw.rect(surface, (120, 50, 50) if map_layer == 0 else (60, 60, 60), btn_top, border_radius=8)
+    label = btn_font.render("TOP", True, (255,255,255))
+    surface.blit(label, (btn_top.centerx - label.get_width()//2, btn_top.centery - label.get_height()//2))
+
+    # BOTTOM button
+    pygame.draw.rect(surface, (120, 50, 50) if map_layer == 1 else (60, 60, 60), btn_bottom, border_radius=8)
+    label = btn_font.render("BOTTOM", True, (255,255,255))
+    surface.blit(label, (btn_bottom.centerx - label.get_width()//2, btn_bottom.centery - label.get_height()//2))
+
+    # Click detection
+    if click:
+        if btn_top.collidepoint(mx, my):
+            map_layer = 0
+            print("Switched to TOP layer")
+        elif btn_bottom.collidepoint(mx, my):
+            map_layer = 1
+            print("Switched to BOTTOM layer")
+
+def draw_map_camera_buttons(surface, map_x, map_y):
+    global CAM_MAP_RECTS, camera_index, map_layer
+
+    CAM_MAP_RECTS = []  # Reset each frame
+
+    btn_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 28)
+
+    for cam_name, data in CAM_MAP_BUTTON_POS.items():
+        pos = data["pos"]
+        layer = data["layer"]
+
+        # Skip if this camera is NOT on the currently selected layer
+        if layer != map_layer:
+            continue
+
+        px, py = pos
+
+        # Button rectangle
+        rect = pygame.Rect(map_x + px - 25, map_y + py - 25, 50, 50)
+
+        mx, my = pygame.mouse.get_pos()
+        hovered = rect.collidepoint(mx, my)
+        active_cam = (CAMERA_ORDER[camera_index] == cam_name)
+
+        # Color logic
+        if active_cam:
+            color = (200, 40, 40)     # active
+        elif hovered:
+            color = (150, 150, 150)   # hover
+        else:
+            color = (90, 90, 90)
+
+        pygame.draw.rect(surface, color, rect, border_radius=12)
+        pygame.draw.rect(surface, (20, 20, 20), rect, 3, border_radius=12)
+
+        # Label like 1A, 1B, 2, etc.
+        label = btn_font.render(CAM_LABELS[cam_name], True, (240, 240, 240))
+        surface.blit(label, (
+            rect.centerx - label.get_width() // 2,
+            rect.centery - label.get_height() // 2
+        ))
+
+        CAM_MAP_RECTS.append((rect, cam_name))
+
+
+
+def draw_map_overlay(surface):
+    """
+    Draw the map overlay at centered position and return the three main button rects:
+    (top_rect, bottom_rect, close_rect). Also populates global CAM_MAP_RECTS.
+    Uses: MAP_TOP, MAP_BOTTOM, CAM_MAP_BUTTON_POS, CAMERA_ORDER, CAM_LABELS
+    Assumes map_layer is 0 (bottom) or 1 (top).
+    """
+    global CAM_MAP_RECTS
+
+    CAM_MAP_RECTS = []
+
+    # --- map position (matches your other code) ---
+    map_x = WIDTH // 2 - 640
+    map_y = HEIGHT // 2 - 360
+
+    # --- draw correct map image for current layer ---
+    if map_layer == 1:
+        surface.blit(MAP_TOP, (map_x, map_y))
+    else:
+        surface.blit(MAP_BOTTOM, (map_x, map_y))
+
+    # --- font for map UI ---
+    MAP_FONT = pygame.font.Font("../assets/fonts/pixel_font.ttf", 32)
+
+    # --------------------------------------------------
+    # 1) TOP / BOTTOM layer buttons
+    # --------------------------------------------------
+    top_rect = pygame.Rect(map_x + 50, map_y + 30, 180, 50)
+    bottom_rect = pygame.Rect(map_x + 260, map_y + 30, 180, 50)
+
+    # button fill: highlight active layer
+    pygame.draw.rect(surface, (120, 50, 50) if map_layer == 1 else (60, 60, 60),
+                     top_rect, border_radius=8)
+    pygame.draw.rect(surface, (120, 50, 50) if map_layer == 0 else (60, 60, 60),
+                     bottom_rect, border_radius=8)
+
+    txt = MAP_FONT.render("TOP", True, (255, 255, 255))
+    surface.blit(txt, (top_rect.centerx - txt.get_width() // 2,
+                       top_rect.centery - txt.get_height() // 2))
+
+    txt = MAP_FONT.render("BOTTOM", True, (255, 255, 255))
+    surface.blit(txt, (bottom_rect.centerx - txt.get_width() // 2,
+                       bottom_rect.centery - txt.get_height() // 2))
+
+    # --------------------------------------------------
+    # 2) Camera buttons on the map (use CAM_MAP_BUTTON_POS)
+    # --------------------------------------------------
+    mx, my = pygame.mouse.get_pos()
+    btn_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 28)
+
+    for cam_name, data in CAM_MAP_BUTTON_POS.items():
+        px, py = data["pos"]
+        layer = data["layer"]
+
+        # only draw cameras for the currently visible layer
+        if layer != map_layer:
+            continue
+
+        # rect positioned relative to map_x/map_y
+        rect = pygame.Rect(map_x + px - 25, map_y + py - 25, 50, 50)
+
+        hovered = rect.collidepoint(mx, my)
+        # active if the current global camera points to this cam name
+        active_cam = (CAMERA_ORDER[camera_index] == cam_name)
+
+        # color logic: active = red, hovered = light grey, default = dark grey
+        if active_cam:
+            color = (200, 40, 40)
+        elif hovered:
+            color = (150, 150, 150)
+        else:
+            color = (90, 90, 90)
+
+        pygame.draw.rect(surface, color, rect, border_radius=12)
+        pygame.draw.rect(surface, (20, 20, 20), rect, 3, border_radius=12)
+
+        # label (1A, 1B, 2, etc.) — fallback to short name if missing
+        label_text = CAM_LABELS.get(cam_name, cam_name[:2])
+        lbl = btn_font.render(label_text, True, (240, 240, 240))
+        surface.blit(lbl, (rect.centerx - lbl.get_width() // 2,
+                           rect.centery - lbl.get_height() // 2))
+
+        CAM_MAP_RECTS.append((rect, cam_name))
+
+    # --------------------------------------------------
+    # 3) MAP close button (reuse camera UI MAP button area)
+    # --------------------------------------------------
+    close_rect = pygame.Rect(WIDTH - 180, 120, 160, 60)
+    pygame.draw.rect(surface, (40, 90, 130), close_rect, border_radius=10)
+    pygame.draw.rect(surface, (20, 20, 20), close_rect, 3, border_radius=10)
+
+    close_label = MAP_FONT.render("MAP", True, (255, 255, 255))
+    surface.blit(close_label, (close_rect.centerx - close_label.get_width() // 2,
+                               close_rect.centery - close_label.get_height() // 2))
+
+    # return rects so your main loop can capture them
+    return top_rect, bottom_rect, close_rect
+
+
+
+
+
+
+
+
+
 # ----- Game state -----
 camera_index = 0   # which camera the player is viewing
 game_over = False
@@ -655,7 +864,7 @@ def draw_camera_hover_bar(screen, mouse_y, dt):
 
 
 def draw_camera_side_panel(surface, active):
-    global CAM_BUTTON_RECTS
+    global CAM_BUTTON_RECTS, MAP_UI_RECT
 
     CAM_BUTTON_RECTS = []   # <-- reset every frame
 
@@ -709,6 +918,25 @@ def draw_camera_side_panel(surface, active):
         ))
 
         CAM_BUTTON_RECTS.append((rect, cam_name))
+
+        # --- MAP BUTTON ---
+    map_rect = pygame.Rect(panel_x + 20, panel_y + 6 * (button_height + spacing),
+                           panel_width - 40, button_height)
+
+    hovered = map_rect.collidepoint(mx, my)
+
+    color = (50, 120, 180) if hovered else (40, 90, 130)
+    pygame.draw.rect(surface, color, map_rect, border_radius=8)
+    pygame.draw.rect(surface, (20, 20, 20), map_rect, 3, border_radius=8)
+
+    map_label = btn_font.render("MAP", True, (255, 255, 255))
+    surface.blit(map_label, (
+        map_rect.centerx - map_label.get_width() // 2,
+        map_rect.centery - map_label.get_height() // 2
+    ))
+
+    MAP_UI_RECT = map_rect
+
 
 
 def mouse_in_camera_ui(mx, my):
@@ -1070,7 +1298,7 @@ pygame.mixer.music.set_volume(1.0)
 
 # ----- Main loop -----
 def main():
-    global game_over, camera_bar_y, click_once, camera_bar_target_y, jumpscare_time,night_timer, camera_index, power, cam_toggle_cooldown, camera_active, camera_button_rect, STATIC_OVERLAY, cam_show_timer, STATIC_FRAME_TIMER, STATIC_FRAME_INDEX, static_alpha, static_target_alpha, jumpscare_active, office_locked, fade, CAM_BAR_ACTIVE_COLOR, CAM_BAR_COLOR, CAM_BAR_FONT, CAM_BAR_HEIGHT, CAM_BAR_TEXT_COLOR, cam_hovered
+    global game_over, camera_bar_y, click_once, camera_bar_target_y, map_open, map_layer, jumpscare_time,night_timer, camera_index, power, cam_toggle_cooldown, camera_active, camera_button_rect, STATIC_OVERLAY, cam_show_timer, STATIC_FRAME_TIMER, STATIC_FRAME_INDEX, static_alpha, static_target_alpha, jumpscare_active, office_locked, fade, CAM_BAR_ACTIVE_COLOR, CAM_BAR_COLOR, CAM_BAR_FONT, CAM_BAR_HEIGHT, CAM_BAR_TEXT_COLOR, cam_hovered
     running = True
     last_time = pygame.time.get_ticks()
     flicker_timer = 0.0
@@ -1078,6 +1306,8 @@ def main():
     static_alpha = 0.0         # current transparency level
     STATIC_FRAME_INDEX = 0
     STATIC_FRAME_TIMER = 0.0
+    map_open = False
+    map_layer = 0  # 0 = bottom, 1 = top
     camera_button_rect = pygame.Rect(WIDTH - 180, HEIGHT - 100, 160, 60)
     door_closed = False
     ambient_timer = random.uniform(20.0, 30.0)  # initial random delay before first ambient
@@ -1237,15 +1467,7 @@ def main():
                         print("Door Open")
                         if DOOR_OPEN_SOUND:
                             DOOR_OPEN_SOUND.play()
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                mx, my = event.pos
 
-                if camera_active:
-                    print("Camera system activated")
-                    static_target_alpha = 120  # flash brighter when camera opens
-                else:
-                    print("Camera closed")
-                    static_target_alpha = 0    # fade out when camera closes
 
         # --- Ambient noise system ---
        
@@ -1336,23 +1558,67 @@ def main():
         elif static_alpha > static_target_alpha:
             static_alpha = max(static_alpha - static_fade_speed * dt, static_target_alpha)
 
-        click_once = False
 
         if camera_active and click_once:
             mx, my = pygame.mouse.get_pos()
 
+            # ---- Camera UI buttons ----
             for rect, cam_name in CAM_BUTTON_RECTS:
                 if rect.collidepoint(mx, my):
                     camera_index = CAMERA_ORDER.index(cam_name)
                     current_camera_name = cam_name
-                    print(f"[CAM] Switched to {cam_name}")
+                    print("[UI] Camera switched:", cam_name)
+                    click_once = False
+                    continue
 
-                    if CAMERA_SWITCH_SOUND:
-                        CAMERA_SWITCH_SOUND.play()
+            # ---- MAP BUTTON ----
+            if MAP_UI_RECT and MAP_UI_RECT.collidepoint(mx, my):
+                map_open = not map_open
+                print("[UI] MAP toggled:", map_open)
+                click_once = False
+                continue
 
-                    break
 
-        # draw ....................................................................................................................................
+            if map_open:
+                # --- TOP layer button ---
+                if MAP_TOP_RECT and MAP_TOP_RECT.collidepoint(mx, my):
+                    map_layer = 1     # <--- TOP = 1
+                    print("[MAP] Switched to TOP")
+                    click_once = False
+                    continue
+
+                # --- BOTTOM layer button ---
+                if MAP_BOTTOM_RECT and MAP_BOTTOM_RECT.collidepoint(mx, my):
+                    map_layer = 0     # <--- BOTTOM = 0
+                    print("[MAP] Switched to BOTTOM")
+                    click_once = False
+                    continue
+
+
+                # 3. MAP CLOSE button
+                if MAP_CLOSE_RECT and MAP_CLOSE_RECT.collidepoint(mx, my):
+                    map_open = False
+                    click_once = False
+                    print("[MAP] Closed")
+                    continue
+
+                # 4. Camera icons on the map
+                for rect, cam_name in CAM_MAP_RECTS:
+                    if rect.collidepoint(mx, my):
+                        camera_index = CAMERA_ORDER.index(cam_name)
+                        current_camera_name = cam_name
+                        print("[MAP] Switched to", cam_name)
+                        click_once = False
+                        break
+
+
+
+
+
+
+        click_once = False
+
+        # draw .............................................................................................................................................................................
         SCREEN.fill((10,10,10))
         # center large camera view
         big_room = ROOMS[CAMERA_ORDER[camera_index]]
@@ -1368,23 +1634,30 @@ def main():
 
         # --- Camera flicker and static ---
         if camera_active:
-            # --- Draw the camera feed ---
-            big_room = ROOMS[CAMERA_ORDER[camera_index]]
-            big_view = big_room.view_surface.copy()
-            draw_camera_side_panel(SCREEN, camera_active)
 
-            # --- Draw animatronic image for the current camera (once per frame) ---
-            drawn_rooms = set()
-            for a in animatronics:
-                if a.current_room == big_room.name and a.visible and a.current_room not in drawn_rooms:
-                    anim_img = a.get_room_image()
-                    big_view.blit(anim_img, (0, 0))
-                    drawn_rooms.add(a.current_room)
+            # --- MAP VIEW ---
+            if map_open:
+                MAP_TOP_RECT, MAP_BOTTOM_RECT, MAP_CLOSE_RECT = draw_map_overlay(SCREEN)
 
 
+            # --- NORMAL CAMERA FEED ---
+            else:
+                big_room = ROOMS[CAMERA_ORDER[camera_index]]
+                big_view = big_room.view_surface.copy()
+                draw_camera_side_panel(SCREEN, camera_active)
 
-            big_scaled = pygame.transform.scale(big_view, (1280, 720))
-            SCREEN.blit(big_scaled, (WIDTH//2 - 640, HEIGHT//2 - 360))
+                # render animatronics onto feed
+                drawn_rooms = set()
+                for a in animatronics:
+                    if a.current_room == big_room.name and a.visible and a.current_room not in drawn_rooms:
+                        anim_img = a.get_room_image()
+                        big_view.blit(anim_img, (0, 0))
+                        drawn_rooms.add(a.current_room)
+
+                big_scaled = pygame.transform.scale(big_view, (1280, 720))
+                SCREEN.blit(big_scaled, (WIDTH//2 - 640, HEIGHT//2 - 360))
+
+
 
                 # --- Animated static overlay for 1080p (with fade) ---
             if CAMERA_ORDER[camera_index] != "Office" and STATIC_FRAMES:
