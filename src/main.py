@@ -6,6 +6,8 @@ from typing import List, Tuple
 import os
 from moviepy.editor import VideoFileClip
 from PIL import Image
+from animatronic import Animatronic, ANIMATRONIC_PATHS, GameContext
+import time
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -13,13 +15,39 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 if not hasattr(Image, 'ANTIALIAS'):
     Image.ANTIALIAS = Image.LANCZOS
 
+frame_index = 0
+frame_timer = 0
+frame_delay = 0.08
+
+rainer_timer = 0
+rainer_alpha = 0
+
+local_static = []   # will be overridden after loading
+static_frames = []  # if used
+
+in_menu = True
+in_controls_menu = False
+
+
+# Night clock setup
+night_start_time = time.time()
+night_length = 450  # 7 minutes 30 seconds
+current_hour = "12 AM"
 
 
 # --- Camera Map Clickable Buttons ---
 CAM_MAP_RECTS = []   # list of (pygame.Rect, cam_name)
 MAP_UI_RECT = None   # button in camera UI that opens map
-MAP_CLOSE_RECT = None  # button inside map that closes map
 
+
+hour_offsets = [
+    random.uniform(0, 5),  # 12→1 AM delay
+    random.uniform(0, 5),  # 1→2 AM
+    random.uniform(0, 5),  # ...
+    random.uniform(0, 5),
+    random.uniform(0, 5),
+    random.uniform(0, 5)
+]
 
 click_once = False
 
@@ -48,8 +76,6 @@ def load_placeholder_surface(text, size=(320, 240)):
 
 jumpscare_active = False
 CAMERA_IMG = load_placeholder_surface("Camera View")
-ANIM_IMG = pygame.Surface((48, 48))
-ANIM_IMG.fill((200, 50, 50))
 JUMPSCARE_IMG = pygame.Surface((WIDTH, HEIGHT))
 JUMPSCARE_IMG.fill((255,0,0))
 JUMP_TEXT = FONT.render("JUMPSCARE!", True, (255,255,255))
@@ -91,6 +117,9 @@ def create_scanline_surface(width, height):
 
 SCANLINE_OVERLAY = create_scanline_surface(WIDTH, HEIGHT)
 
+
+ANIM_IMG = pygame.Surface((48, 48))
+ANIM_IMG.fill((200, 50, 50))
 
 # --- Office sprites ---
 OFFICE_BASE = pygame.image.load("../assets/rooms/Office/office_base.png").convert()
@@ -142,6 +171,14 @@ BACKGROUND_LOOP = safe_load_sound("../assets/sounds/background_loop.wav")
 CAMERA_SWITCH_SOUND = safe_load_sound("../assets/sounds/cam_select.wav")
 DOOR_CLOSE_SOUND = safe_load_sound("../assets/sounds/door_close.wav")
 DOOR_OPEN_SOUND = safe_load_sound("../assets/sounds/door_open.wav")
+MAP_OPEN_SOUND = safe_load_sound("../assets/sounds/map_open.wav")
+MAP_CLOSE_SOUND = safe_load_sound("../assets/sounds/map_open.wav")
+CAM_OPEN_SOUND = safe_load_sound("../assets/sounds/cam_open.wav")
+CAM_CLOSE_SOUND = safe_load_sound("../assets/sounds/cam_close.wav")
+
+
+
+CAM_OPEN_CHANNEL = pygame.mixer.Channel(7)   # pick any free channel
 
 # Jumpscare video
 RAINER_JUMPSCARE_VIDEO_PATH = "../assets/jumpscares/rainer_jumpscare.mp4"
@@ -163,7 +200,6 @@ STATIC_FRAMES = load_gif_frames("../assets/effects/static.gif")
 STATIC_FRAME_INDEX = 0
 STATIC_FRAME_TIMER = 0.0
 
-
 # ----- Map / Rooms / Waypoints -----
 @dataclass
 class Room:
@@ -172,7 +208,7 @@ class Room:
     waypoints: List[Tuple[int, int]]  # coordinates local to room
 
 
-def safe_load_image(path, size=(320, 240)):
+def load_room_image(path, size=(320, 240)):
     """Safely load a PNG or return a placeholder if missing."""
     if not os.path.exists(path):
         print(f"[WARN] Missing room image: {path}")
@@ -196,39 +232,35 @@ MAP_BOTTOM = pygame.transform.scale(MAP_BOTTOM, (1280, 720))
 ROOMS = {
     "Stage": Room(
         "Stage",
-        safe_load_image("../assets/rooms/stage.png", (320, 240)),
+        load_room_image("../assets/rooms/stage.png", (320, 240)),
         waypoints=[(160, 30), (160, 210)]
     ),
     "Hall": Room(
         "Hall",
-        safe_load_image("../assets/rooms/hall.png", (320, 240)),
+        load_room_image("../assets/rooms/hall.png", (320, 240)),
         waypoints=[(50, 50), (250, 180)]
     ),
     "Kitchen": Room(
         "Kitchen",
-        safe_load_image("../assets/rooms/kitchen.png", (320, 240)),
+        load_room_image("../assets/rooms/kitchen.png", (320, 240)),
         waypoints=[(30, 30), (280, 200)]
     ),
     "HallCorner": Room(
         "HallCorner",
-        safe_load_image("../assets/rooms/hallcorner.png", (320, 240)),
+        load_room_image("../assets/rooms/hallcorner.png", (320, 240)),
         waypoints=[(60, 60), (260, 180)]
     ),
     "Backroom": Room(
         "Backroom",
-        safe_load_image("../assets/rooms/backroom.png", (320, 240)),
+        load_room_image("../assets/rooms/backroom.png", (320, 240)),
         waypoints=[(100, 100), (220, 160)]
     ),
     "Office": Room(
         "Office",
-        safe_load_image("../assets/rooms/office.png", (320, 240)),
+        load_room_image("../assets/rooms/office.png", (320, 240)),
         waypoints=[(0, 0)]
     ),
 }
-
-
-
-# ----- Room Connections -----
 ROOM_CONNECTIONS = {
     "Stage": ["Hall"],
     "Hall": ["Stage", "Backroom", "HallCorner"],
@@ -236,15 +268,8 @@ ROOM_CONNECTIONS = {
     "HallCorner": ["Hall", "Office"],
     "Backroom": ["Hall", "HallCorner"],
     "Office": ["Hall", "HallCorner"]
-} 
-
-
-
-# --- Fixed Animatronic Routes (like FNaF paths) ---
-ANIMATRONIC_PATHS = {
-    "Rainer": ["Stage", "Hall", "Backroom", "Hall", "HallCorner", "Office"],
-    "Fliege": ["Kitchen", "Backroom", "Hall", "HallCorner", "Office"]
 }
+
 
 
 # ----- Door & Power System -----
@@ -271,301 +296,21 @@ CAM_LABELS = {
 VIEWABLE_CAMERAS = [r for r in CAMERA_ORDER if r != "Office"]
 
 
+# MAP HOVER BAR STATE
+map_bar_x = WIDTH
+map_bar_target_x = WIDTH - 80
+map_bar_width = 80
+
+map_open_hover = False
+map_toggle_cooldown = 0
+map_hover_timer = 0
 
 
 MAX_POWER = 100.0
 power = MAX_POWER
-POWER_DRAIN_IDLE = 0.005      # per frame when doing nothing
-POWER_DRAIN_CAMERA = 0.015    # per frame when viewing cameras
-POWER_DRAIN_DOOR = 0.03       # per frame per closed door
-
-for name, route in ANIMATRONIC_PATHS.items():
-    base_dir = f"../assets/animatronics/{name}/"
-    missing = [room for room in route if not os.path.exists(f"{base_dir}{room}.png")]
-    if missing:
-        print(f"[DEBUG] Missing PNGs for {name}: {missing}")
-
-
-
-class Animatronic:
-    def __init__(self, name, start_room, route=None):
-        self.name = name
-        self.current_room = start_room
-        self.pos = list(random.choice(ROOMS[start_room].waypoints))
-        self.waypoint_index = 0
-
-        # movement / timing
-        self.speed = 60  # not used for teleport movement but kept for future
-        self.state = "patrol"
-        self.move_timer = random.uniform(5.0, 10.0)
-        self.aggression = 1.0
-        self.attack_timer = 0.0
-        self.target_room = None
-        self.visible = True
-        self.images = self.load_room_images(name)
-
-        # smooth transition state (prevents instant double-moves)
-        self.transitioning = False
-        self.transition_target = None
-        self.transition_progress = 0.0
-        self.transition_duration = 0.0
-
-        # Path/route for this anim; prefer explicit route arg, fallback to global dict
-        if route:
-            self.route = route
-        else:
-            self.route = ANIMATRONIC_PATHS.get(self.name, [])
-
-        # ensure start room is valid for the route (if route exists)
-        if self.route and self.current_room not in self.route:
-            # place them at the route start to avoid desyncs
-            self.current_room = self.route[0]
-            self.pos = list(random.choice(ROOMS[self.current_room].waypoints))
-
-
-    def load_room_images(self, name):
-        """Load per-room images for this animatronic."""
-        images = {}
-        base_path = f"../assets/animatronics/{name}/"
-        for room in CAMERA_ORDER:
-            path = os.path.join(base_path, f"{room.lower()}.png")
-            if os.path.exists(path):
-                images[room] = pygame.image.load(path).convert_alpha()
-                print(f"[OK] Loaded {name} image for {room}")
-            else:
-                print(f"[WARN] Missing {name} image for {room}")
-        return images
-
-    def get_room_image(self):
-        """Return the current room’s image, or a fallback."""
-        return self.images.get(self.current_room, ANIM_IMG)
-
-
-    def update(self, dt):
-        """Update AI behavior: timed movement, state logic, aggression scaling."""
-        # Increase aggression slowly as the night goes on
-        self.aggression = min(self.aggression + dt * 0.02, 3.0)
-
-        # If currently transitioning between rooms, progress the transition
-        if self.transitioning:
-            # advance normalized progress (0..1)
-            if self.transition_duration <= 0:
-                self.transition_duration = 1.0
-            self.transition_progress += dt / self.transition_duration
-
-            if self.transition_progress >= 1.0:
-                # finish transition
-                self.transitioning = False
-                arrived = self.transition_target
-                self.transition_target = None
-                self.transition_progress = 0.0
-                self.transition_duration = 0.0
-
-                # set new room & randomize waypoint inside that room
-                self.current_room = arrived
-                if ROOMS.get(self.current_room) and ROOMS[self.current_room].waypoints:
-                    self.pos = list(random.choice(ROOMS[self.current_room].waypoints))
-                else:
-                    # fallback safe pos
-                    self.pos = [0, 0]
-
-                # if arrived at office, check attack conditions
-                if self.current_room == PLAYER_ROOM:
-                    if not is_door_closed_between("Hall", "Office") or power <= 0:
-                        self.state = "attack"
-                        self.attack_timer = 0.0
-                    else:
-                        self.state = "patrol"
-                else:
-                    self.state = "patrol"
-
-            # while transitioning, skip the rest of update
-            return
-
-        # Not transitioning: normal timers and decisions
-        self.move_timer -= dt
-
-        if self.state == "patrol":
-            # optional local patrol inside the room (waypoints) - keep sprite moving
-            self.patrol(dt)
-            if self.move_timer <= 0:
-                self.try_move()
-                # reset timer (shorter as aggression increases)
-                self.move_timer = random.uniform(5.0 / max(self.aggression, 0.1),
-                                                 10.0 / max(self.aggression, 0.1))
-
-        elif self.state == "attack":
-            self.attack_timer += dt
-            if self.attack_timer > 3.0:
-                self.state = "jumpscare"
-
-    def patrol(self, dt):
-        """Move between waypoints smoothly; reset safely if index out of range."""
-        room = ROOMS.get(self.current_room)
-        if not room or not room.waypoints:
-            # Fallback: stay still if no valid waypoints
-            self.pos = [0, 0]
-            self.waypoint_index = 0
-            return
-
-        # Ensure waypoint index is always valid
-        if self.waypoint_index >= len(room.waypoints):
-            self.waypoint_index = 0
-
-        target = room.waypoints[self.waypoint_index]
-        dx = target[0] - self.pos[0]
-        dy = target[1] - self.pos[1]
-        dist = (dx*dx + dy*dy) ** 0.5
-
-        if dist < 4:
-            # move to next waypoint safely
-            self.waypoint_index = (self.waypoint_index + 1) % len(room.waypoints)
-            return
-
-        # move toward current target
-        vx = (dx / dist) * self.speed
-        vy = (dy / dist) * self.speed
-        self.pos[0] += vx * dt
-        self.pos[1] += vy * dt
-
-
-    def try_move(self):
-        """Follow a defined route with smooth transitions and random timing."""
-        if not self.route:
-            return
-
-        # Initialize current route index if not set
-        if not hasattr(self, "route_index"):
-            self.route_index = 0
-
-        # Safety: if the current room mismatches route position, resync
-        if self.current_room != self.route[self.route_index]:
-            if self.current_room in self.route:
-                self.route_index = self.route.index(self.current_room)
-            else:
-                self.route_index = 0
-                self.current_room = self.route[0]
-
-        # Determine next room
-        if self.route_index < len(self.route) - 1:
-            next_room = self.route[self.route_index + 1]
-        else:
-            # route finished — loop back to start
-            next_room = self.route[0]
-
-        # Don’t start a new transition if one is active
-        if getattr(self, "transitioning", False):
-            return
-
-        # Random movement chance (depends on aggression)
-        move_chance = 0.25 * self.aggression
-        if random.random() < move_chance:
-            # If moving from Hall to Office — special case
-            if self.current_room == "Hall" and next_room == "Office":
-                if not is_door_closed_between("Hall", "Office"):
-                    print(f"[AI] {self.name} entering Office — attack imminent!")
-                    self.move_to_room("Office")
-                    self.state = "attack"
-                else:
-                    print(f"[AI] {self.name} is blocked by closed door at Hall → Office.")
-                return
-
-            # Prevent blocked transitions
-            if is_door_closed_between(self.current_room, next_room):
-                print(f"[AI] {self.name} blocked between {self.current_room} and {next_room}")
-                return
-
-            # Start transition
-            self.transitioning = True
-            self.transition_target = next_room
-            self.transition_progress = 0.0
-            self.transition_duration = random.uniform(2.0, 6.0) / max(self.aggression, 0.1)
-
-            # Advance the route index for next time
-            self.route_index = (self.route_index + 1) % len(self.route)
-
-            print(f"[AI] {self.name} starts moving {self.current_room} → {next_room} (dur {self.transition_duration:.2f}s)")
-
-
-
-    def move_to_room(self, room_name):
-        """Legacy teleport helper (keeps compatibility); prefer transitions above."""
-        global office_locked
-
-        # Check valid connection
-        if room_name not in ROOM_CONNECTIONS.get(self.current_room, []):
-            return
-
-        # Prevent entering the office if a jumpscare already started
-        if office_locked and room_name == "Office":
-            return
-
-        # Normal door blocking
-        if is_door_closed_between(self.current_room, room_name):
-            return
-
-        # Move to the new room
-        self.current_room = room_name
-        if ROOMS.get(room_name) and ROOMS[room_name].waypoints:
-            self.pos = list(random.choice(ROOMS[room_name].waypoints))
-        self.waypoint_index = 0
-
-        # Attack logic
-        if room_name == PLAYER_ROOM:
-            if not is_door_closed_between("Hall", "Office") or power <= 0:
-                self.state = "attack"
-                self.attack_timer = 0.0
-        else:
-            self.state = "patrol"
-
-
-    def get_room_image(self):
-        """Return the animatronic's image for the current room (if available)."""
-        import os
-
-        # Initialize cache once
-        if not hasattr(self, "_room_images"):
-            self._room_images = {}
-
-        # Return from cache if available
-        if self.current_room in self._room_images:
-            return self._room_images[self.current_room]
-
-        # Build normalized path: FNBD/assets/animatronics/Rainer/Backroom.png
-        folder = os.path.join("..", "assets", "animatronics", self.name)
-        filename = f"{self.current_room}.png"
-        path = os.path.join(folder, filename)
-        path = path.replace("\\", "/")  # normalize for pygame compatibility
-
-        try:
-            # Load and cache image
-            img = pygame.image.load(path).convert_alpha()
-            img = pygame.transform.scale(img, (320, 240))  # match camera viewport
-            self._room_images[self.current_room] = img
-            print(f"[OK] Loaded {self.name} image for {self.current_room}")
-            return img
-
-        except Exception as e:
-            # Fallback placeholder (so missing images won't crash)
-            print(f"[WARN] Missing or failed to load {path}: {e}")
-            placeholder = pygame.Surface((320, 240), pygame.SRCALPHA)
-            placeholder.fill((255, 0, 0, 80))
-            pygame.draw.rect(placeholder, (255, 50, 50), placeholder.get_rect(), 3)
-            self._room_images[self.current_room] = placeholder
-            return placeholder
-
-
-
-
-    def draw_on_surface(self, surf):
-        surf.blit(ANIM_IMG, (int(self.pos[0]) - 24, int(self.pos[1]) - 24))
-
-# create animatronics
-animatronics = [
-    Animatronic("Rainer", "Stage"),
-    Animatronic("Fliege", "Hall")
-]
-
+POWER_DRAIN_IDLE = 0.0025      # slower idle drain
+POWER_DRAIN_CAMERA = 0.008     # slower drain when cameras are active
+POWER_DRAIN_DOOR = 0.02        # slightly reduced door cost
 
 def draw_map_buttons(surface, x, y):
     global map_layer
@@ -640,8 +385,6 @@ def draw_map_camera_buttons(surface, map_x, map_y):
         ))
 
         CAM_MAP_RECTS.append((rect, cam_name))
-
-
 
 def draw_map_overlay(surface):
     """
@@ -741,11 +484,37 @@ def draw_map_overlay(surface):
     # return rects so your main loop can capture them
     return top_rect, bottom_rect, close_rect
 
+def is_door_closed_between(room_a, room_b):
+    key = (room_a, room_b) if (room_a, room_b) in DOORS else (room_b, room_a)
+    return DOORS.get(key, {}).get("closed", False)
 
+# --- Build Game Context ---
+game = GameContext(
+    rooms=ROOMS,
+    room_connections=ROOM_CONNECTIONS,
+    camera_order=CAMERA_ORDER,
+    anim_img=ANIM_IMG,
+    player_room="Office",
+    door_checker=is_door_closed_between,
+    get_power=lambda: power
+)
 
+# --- Create Animatronics using the new class ---
+rainer = Animatronic(
+    "Rainer",
+    "Stage",
+    game,
+    route=ANIMATRONIC_PATHS["Rainer"]
+)
 
+fliege = Animatronic(
+    "Fliege",
+    "Kitchen",
+    game,
+    route=ANIMATRONIC_PATHS["Fliege"]
+)
 
-
+animatronics = [rainer, fliege]
 
 
 
@@ -753,7 +522,7 @@ def draw_map_overlay(surface):
 camera_index = 0   # which camera the player is viewing
 game_over = False
 jumpscare_time = 0.0
-NIGHT_LENGTH = 90  # seconds for the "night"
+NIGHT_LENGTH = 450  # 7 minutes 30 seconds like FNaF
 night_timer = NIGHT_LENGTH
 start_ticks = pygame.time.get_ticks()
 
@@ -825,16 +594,24 @@ def draw_camera_hover_bar(screen, mouse_y, dt):
 
     # --- FNaF toggle logic ---
     if hovering and not last_hover_state and cam_toggle_cooldown <= 0:
-        # mouse ENTERED the bar → toggle camera
+        # Toggle camera
         camera_active = not camera_active
         cam_toggle_cooldown = toggle_cooldown_time
 
         if camera_active:
             static_target_alpha = 120
             print("[CAM] Monitor OPENED")
+
+            # Play camera open sound on dedicated channel
+            if CAM_OPEN_SOUND:
+                CAM_OPEN_CHANNEL.play(CAM_OPEN_SOUND)
+
         else:
             static_target_alpha = 0
             print("[CAM] Monitor CLOSED")
+
+            # Stop open sound immediately
+            CAM_OPEN_CHANNEL.stop()
 
     # update last state
     last_hover_state = hovering
@@ -861,81 +638,6 @@ def draw_camera_hover_bar(screen, mouse_y, dt):
         glow = pygame.Surface((WIDTH, bar_height), pygame.SRCALPHA)
         glow.fill((255, 255, 255, 20))
         screen.blit(glow, (0, camera_bar_y))
-
-
-def draw_camera_side_panel(surface, active):
-    global CAM_BUTTON_RECTS, MAP_UI_RECT
-
-    CAM_BUTTON_RECTS = []   # <-- reset every frame
-
-    if not active:
-        return
-
-    panel_width = 180
-    panel_x = WIDTH - panel_width
-    panel_y = 120
-    button_height = 70
-    spacing = 10
-
-    # Panel background
-    panel = pygame.Surface((panel_width, HEIGHT - panel_y - 50), pygame.SRCALPHA)
-    panel.fill((0, 0, 0, 80))
-    surface.blit(panel, (panel_x, panel_y))
-
-    # Title
-    title_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 32)
-    title = title_font.render("CAMERAS", True, (200, 200, 200))
-    surface.blit(title, (panel_x + 25, panel_y - 50))
-
-    btn_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 36)
-
-    mx, my = pygame.mouse.get_pos()
-
-    # Create & draw camera buttons
-    for i, cam_name in enumerate(VIEWABLE_CAMERAS[:5]):
-        y = panel_y + i * (button_height + spacing)
-
-        rect = pygame.Rect(panel_x + 20, y, panel_width - 40, button_height)
-
-        hovered = rect.collidepoint(mx, my)
-        active_cam = (CAMERA_ORDER[camera_index] == cam_name)
-
-        # Colors
-        if active_cam:
-            color = (180, 40, 40)
-        elif hovered:
-            color = (150, 150, 150)
-        else:
-            color = (90, 90, 90)
-
-        pygame.draw.rect(surface, color, rect, border_radius=8)
-        pygame.draw.rect(surface, (20, 20, 20), rect, 3, border_radius=8)
-
-        label = btn_font.render(str(i + 1), True, (250, 250, 250))
-        surface.blit(label, (
-            rect.centerx - label.get_width() // 2,
-            rect.centery - label.get_height() // 2
-        ))
-
-        CAM_BUTTON_RECTS.append((rect, cam_name))
-
-        # --- MAP BUTTON ---
-    map_rect = pygame.Rect(panel_x + 20, panel_y + 6 * (button_height + spacing),
-                           panel_width - 40, button_height)
-
-    hovered = map_rect.collidepoint(mx, my)
-
-    color = (50, 120, 180) if hovered else (40, 90, 130)
-    pygame.draw.rect(surface, color, map_rect, border_radius=8)
-    pygame.draw.rect(surface, (20, 20, 20), map_rect, 3, border_radius=8)
-
-    map_label = btn_font.render("MAP", True, (255, 255, 255))
-    surface.blit(map_label, (
-        map_rect.centerx - map_label.get_width() // 2,
-        map_rect.centery - map_label.get_height() // 2
-    ))
-
-    MAP_UI_RECT = map_rect
 
 
 
@@ -1001,9 +703,6 @@ def toggle_door_between(room_a, room_b):
     if key in DOORS:
         DOORS[key]["closed"] = not DOORS[key]["closed"]
 
-def is_door_closed_between(room_a, room_b):
-    key = (room_a, room_b) if (room_a, room_b) in DOORS else (room_b, room_a)
-    return DOORS.get(key, {}).get("closed", False)
 
 def drain_power(dt, camera_on):
     """Return new power value after drain."""
@@ -1018,223 +717,274 @@ def drain_power(dt, camera_on):
 
 
 def main_menu():
-    """Display the main menu with Start, Controls, and Quit buttons, including static background."""
-    # --- Load background music ---
+    # --- Load menu music ---
     menu_music = safe_load_sound("../assets/sounds/menu_theme.wav")
     if menu_music:
         menu_music.set_volume(0.5)
         menu_music.play(-1)
 
+    # --- Fonts ---
     title_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 64)
     button_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 28)
+    info_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 32)
 
-    # Ensure STATIC_FRAMES exist and are scaled to screen
-    if not STATIC_FRAMES:
-        # fallback single dark static surface
-        local_static = [pygame.Surface((WIDTH, HEIGHT))]
-        local_static[0].fill((10, 10, 10))
+    # --- Build STATIC frames ---
+    if STATIC_FRAMES:
+        static_frames = [
+            pygame.transform.scale(f, (WIDTH, HEIGHT)).convert_alpha()
+            for f in STATIC_FRAMES
+        ]
     else:
-        # Use a local reference (avoid stomping global reference), ensure scaled
-        local_static = []
-        for f in STATIC_FRAMES:
-            try:
-                local_static.append(pygame.transform.scale(f, (WIDTH, HEIGHT)).convert_alpha())
-            except Exception:
-                # in case frame isn't suitable for scaling
-                local_static.append(pygame.Surface((WIDTH, HEIGHT)).convert())
+        surf = pygame.Surface((WIDTH, HEIGHT))
+        surf.fill((20, 20, 20))
+        static_frames = [surf]
 
-    # --- Animation state for menu static ---
     frame_index = 0
     frame_timer = 0.0
-    frame_delay = 0.04  # seconds between static frames
+    frame_delay = 0.04
 
-    # --- Rainer flash (kept minimal) ---
+    # --- Rainer flash effect ---
     try:
         rainer_img = pygame.image.load("../assets/images/rainer_flash.png").convert_alpha()
         rainer_img = pygame.transform.scale(rainer_img, (WIDTH, HEIGHT))
-    except Exception:
+    except:
         rainer_img = None
+
     rainer_timer = random.uniform(5.0, 12.0)
     rainer_alpha = 0
 
-    # --- Buttons ---
-    start_rect = pygame.Rect(WIDTH // 2 - 150, HEIGHT // 2, 300, 80)
-    controls_rect = pygame.Rect(WIDTH // 2 - 150, HEIGHT // 2 + 120, 300, 80)
-    quit_rect = pygame.Rect(WIDTH // 2 - 150, HEIGHT // 2 + 240, 300, 80)
+    # Buttons
+    start_rect = pygame.Rect(WIDTH//2 - 150, HEIGHT//2, 300, 80)
+    controls_rect = pygame.Rect(WIDTH//2 - 150, HEIGHT//2 + 120, 300, 80)
+    quit_rect = pygame.Rect(WIDTH//2 - 150, HEIGHT//2 + 240, 300, 80)
+    back_rect = pygame.Rect(WIDTH//2 - 150, HEIGHT - 200, 300, 80)
 
-    in_menu = True
-    show_controls = False
+    in_controls_menu = False
+    running = True
 
-    def draw_creepy_button(rect, text, hover):
+    # -------- BUTTON DRAW --------
+    def draw_button(rect, text, hovered):
         base_color = (40, 30, 30)
-        hover_color = (70, 20, 20) if hover else base_color
-        flicker_strength = random.randint(-10, 10)
-        color = tuple(max(0, min(255, c + flicker_strength)) for c in hover_color)
-        offset_x = random.randint(-1, 1) if hover else 0
-        offset_y = random.randint(-1, 1) if hover else 0
+        hover_color = (70, 20, 20) if hovered else base_color
 
-        # button rect
+        # Color flicker
+        flicker = random.randint(-10, 10)
+        color = (
+            max(0, min(255, hover_color[0] + flicker)),
+            max(0, min(255, hover_color[1] + flicker)),
+            max(0, min(255, hover_color[2] + flicker)),
+        )
+
+        # Button shake when hovered
+        offset_x = random.randint(-1, 1) if hovered else 0
+        offset_y = random.randint(-1, 1) if hovered else 0
+
+        # Draw main button
         pygame.draw.rect(SCREEN, color, rect, border_radius=12)
 
-        # faint glow when hovered
-        if hover:
+        # Glow effect
+        if hovered:
             glow = pygame.Surface((rect.width + 10, rect.height + 10), pygame.SRCALPHA)
-            pygame.draw.rect(glow, (255, 30, 30, 30), glow.get_rect(), border_radius=12)
+            pygame.draw.rect(glow, (255, 30, 30, 35), glow.get_rect(), border_radius=12)
             SCREEN.blit(glow, (rect.x - 5, rect.y - 5))
 
+        # Draw label
         label = button_font.render(text, True, (220, 220, 220))
-        SCREEN.blit(label, (rect.centerx - label.get_width() // 2 + offset_x,
-                            rect.centery - label.get_height() // 2 + offset_y))
+        SCREEN.blit(label, (
+            rect.centerx - label.get_width()//2 + offset_x,
+            rect.centery - label.get_height()//2 + offset_y
+        ))
 
-    def draw_controls_screen(dt_local):
-        """Draw the controls screen with the same static background (use dt_local to advance static)."""
-        nonlocal frame_index, frame_timer, rainer_timer, rainer_alpha
 
-        # Background = static animation
-        # --- Static background animation ---
+    # -------- MAIN MENU LOOP --------
+    while running:
+        dt = CLOCK.tick(60)/1000.0
+
+        # --- static animation ---
         frame_timer += dt
-        if frame_timer >= 0.04:
-            frame_timer = 0.0
-            frame_index = (frame_index + 1) % len(local_static)
+        if frame_timer >= frame_delay:
+            frame_timer = 0
+            frame_index = (frame_index + 1) % len(static_frames)
 
-        bg = local_static[frame_index]
-        if bg:
-            static_surface = bg.copy()
-            static_surface.set_alpha(50)  # 🔧 Adjust transparency (30–60 = good range)
-            SCREEN.blit(static_surface, (0, 0))
-
-        # optional dark overlay for FNaF-like depth
-        overlay = pygame.Surface((WIDTH, HEIGHT))
-        overlay.fill((0, 0, 0))
-        overlay.set_alpha(60)  # 🔧 adjust to 60–90 for darker look
-        SCREEN.blit(overlay, (0, 0))
+        static_surface = static_frames[frame_index].copy()
+        static_surface.set_alpha(50)     # 50 = transparent static (old style)
+        SCREEN.blit(static_surface, (0, 0))
 
 
-        # scanline overlay for CRT feel
+        # --- dark overlay ---
+        dark = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        dark.fill((0, 0, 0, 80))
+        SCREEN.blit(dark, (0,0))
+
+        # --- scanlines ---
         if 'SCANLINE_OVERLAY' in globals() and SCANLINE_OVERLAY:
-            SCREEN.blit(SCANLINE_OVERLAY, (0, 0))
+            SCREEN.blit(SCANLINE_OVERLAY, (0,0))
 
+        mx, my = pygame.mouse.get_pos()
 
-        # optional rainer flash (very subtle)
-        rainer_timer -= dt_local
+        # --- Rainer flash ---
+        rainer_timer -= dt
         if rainer_img and rainer_timer <= 0:
             rainer_alpha = 255
             rainer_timer = random.uniform(8.0, 14.0)
-        if rainer_alpha > 0 and rainer_img:
-            rainer_alpha = max(rainer_alpha - 700 * dt_local, 0)
-            temp = rainer_img.copy()
-            temp.set_alpha(int(rainer_alpha * 0.6))
-            SCREEN.blit(temp, (0, 0))
-            flash = pygame.Surface((WIDTH, HEIGHT))
-            flash.fill((255, 255, 255))
-            flash.set_alpha(int(rainer_alpha * 0.25))
-            SCREEN.blit(flash, (0, 0))
 
-        # Title & header
-        if random.random() < 0.02:
-            flicker_color = (random.randint(150, 255), random.randint(150, 255), random.randint(150, 255))
+        if rainer_alpha > 0 and rainer_img:
+            rainer_alpha = max(0, rainer_alpha - 300 * dt)
+            temp = rainer_img.copy()
+            temp.set_alpha(int(rainer_alpha))
+            SCREEN.blit(temp, (0,0))
+
+        # -------- CONTROL SCREEN --------
+        if in_controls_menu:
+            header = title_font.render("Controls", True, (255, 255, 255))
+            SCREEN.blit(header, (WIDTH//2 - header.get_width()//2, 120))
+
+            lines = [
+                "1-5  : Switch cameras",
+                "D    : Toggle Office Door",
+                "Hover bottom arrow : Open camera monitor",
+                "ESC  : Quit game"
+            ]
+
+            y = 300
+            for line in lines:
+                t = info_font.render(line, True, (220, 220, 220))
+                SCREEN.blit(t, (WIDTH//2 - t.get_width()//2, y))
+                y += 60
+
+            draw_button(back_rect, "Back", back_rect.collidepoint(mx,my))
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit(); sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if back_rect.collidepoint(mx,my):
+                        in_controls_menu = False
+
+            pygame.display.flip()
+            continue
+
+        # -------- MAIN MENU SCREEN --------
+        if random.random() < 0.03:
+            flicker_color = (
+                random.randint(150, 255),
+                random.randint(150, 255),
+                random.randint(150, 255)
+            )
         else:
             flicker_color = (255, 255, 255)
-        header = title_font.render("Controls & Info", True, flicker_color)
-        SCREEN.blit(header, (WIDTH // 2 - header.get_width() // 2, 120))
 
-        info_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 32)
-        lines = [
-            "1-6 : Switch cameras",
-            "D   : Toggle office door",
-            "Hover the bottom arrow : Open cameras",
-            "ESC : Quit the game",
-        ]
-        y = 280
-        for line in lines:
-            txt = info_font.render(line, True, (200, 200, 200))
-            SCREEN.blit(txt, (WIDTH // 2 - txt.get_width() // 2, y))
-            y += 60
 
-        # Back button
-        back_rect = pygame.Rect(WIDTH // 2 - 150, HEIGHT - 200, 300, 80)
-        mx, my = pygame.mouse.get_pos()
-        draw_creepy_button(back_rect, "Back", back_rect.collidepoint(mx, my))
-        return back_rect
+        title = title_font.render("FIVE NIGHTS AT DRACHENSCHANZE", True, flicker_color)
+        SCREEN.blit(title, (WIDTH//2 - title.get_width()//2, HEIGHT//3))
 
-    # main menu loop
-    while in_menu:
-        dt = CLOCK.tick(60) / 1000.0
+        # Buttons
+        draw_button(start_rect, "Start Night", start_rect.collidepoint(mx,my))
+        draw_button(controls_rect, "Controls", controls_rect.collidepoint(mx,my))
+        draw_button(quit_rect, "Quit", quit_rect.collidepoint(mx,my))
 
-        # advance static while menu or controls shown
-        frame_timer += dt
-        if frame_timer >= frame_delay:
-            frame_timer = 0.0
-            frame_index = (frame_index + 1) % len(local_static)
-
-        # draw static background
-        bg = local_static[frame_index]
-        bg = local_static[frame_index]
-        if bg:
-            static_surface = bg.copy()
-            static_surface.set_alpha(50)  # LOWER = more transparent (try 30–60)
-            SCREEN.blit(static_surface, (0, 0))
-
-        else:
-            SCREEN.fill((0, 0, 0))
-
-        # overlay scanlines
-        if 'SCANLINE_OVERLAY' in globals() and SCANLINE_OVERLAY:
-            SCREEN.blit(SCANLINE_OVERLAY, (0, 0))
-
-        # subtle dark overlay
-        overlay = pygame.Surface((WIDTH, HEIGHT))
-        overlay.fill((0, 0, 0))
-        overlay.set_alpha(60)
-        SCREEN.blit(overlay, (0, 0))
-
+        # --- EVENT HANDLING ---
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                mx, my = event.pos
-                if show_controls:
-                    # call draw_controls_screen to get the current back_rect and check click
-                    back_rect = draw_controls_screen(dt)
-                    if back_rect.collidepoint(mx, my):
-                        show_controls = False
-                else:
-                    if start_rect.collidepoint(mx, my):
-                        in_menu = False
-                    elif controls_rect.collidepoint(mx, my):
-                        show_controls = True
-                    elif quit_rect.collidepoint(mx, my):
-                        pygame.quit()
-                        sys.exit()
-
-        # draw title + buttons or controls screen
-        if not show_controls:
-            # title with tiny flicker/jitter
-            if random.random() < 0.02:
-                flicker_color = (random.randint(150, 255), random.randint(150, 255), random.randint(150, 255))
-            else:
-                flicker_color = (255, 255, 255)
-            title = title_font.render("FIVE NIGHTS AT DRACHENSCHANZE", True, flicker_color)
-            title_y_offset = random.randint(-1, 1)
-            SCREEN.blit(title, (WIDTH // 2 - title.get_width() // 2, HEIGHT // 3 - 50 + title_y_offset))
-
-            # Draw buttons
-            mx, my = pygame.mouse.get_pos()
-            draw_creepy_button(start_rect, "Start Night", start_rect.collidepoint(mx, my))
-            draw_creepy_button(controls_rect, "Controls", controls_rect.collidepoint(mx, my))
-            draw_creepy_button(quit_rect, "Quit", quit_rect.collidepoint(mx, my))
-        else:
-            # controls screen: update static + draw controls + back button
-            back_rect = draw_controls_screen(dt)
+                pygame.quit(); sys.exit()
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if start_rect.collidepoint(mx,my):
+                    running = False
+                elif controls_rect.collidepoint(mx,my):
+                    in_controls_menu = True
+                elif quit_rect.collidepoint(mx,my):
+                    pygame.quit(); sys.exit()
 
         pygame.display.flip()
 
-    # fade out music briefly as we move into the game
     if menu_music:
         menu_music.fadeout(1500)
 
 
+# --- MAP HOVER BAR (FNaF style, same logic as cam bar) ---
+map_hover_x = 0
+map_hover_target_x = 0
+map_open = False
+map_cooldown = 0.0
+MAP_BAR_WIDTH = 60
+
+
+def draw_map_hover_bar(surface, mouse_y, dt):
+    """
+    Right-side map hover bar that works exactly like the bottom camera bar.
+    Opens map on first hover.
+    Closes ONLY after the player fully leaves the bar, then hovers again.
+    """
+
+    global map_open, map_hover_y, map_hover_target_y
+    global map_toggle_cooldown, map_hover_state
+
+    BAR_W = 55
+    BAR_H = 200
+    open_zone_x = WIDTH - 80     # must move mouse here to open
+    leave_zone_x = WIDTH - 260   # must leave this far to allow closing
+    cooldown_time = 0.35
+
+    mx, my = pygame.mouse.get_pos()
+
+    # ---------- INIT GLOBALS ----------
+    if "map_hover_state" not in globals():
+        map_hover_state = "idle"  # idle → opened → left → ready_to_close
+
+    if "map_toggle_cooldown" not in globals():
+        map_toggle_cooldown = 0
+
+    if "map_hover_y" not in globals():
+        map_hover_y = HEIGHT//2 - BAR_H//2
+
+    if "map_hover_target_y" not in globals():
+        map_hover_target_y = HEIGHT//2 - BAR_H//2
+
+    # ---------- Cooldown ----------
+    if map_toggle_cooldown > 0:
+        map_toggle_cooldown -= dt
+
+    bar_rect = pygame.Rect(WIDTH - BAR_W, map_hover_y, BAR_W, BAR_H)
+    hovering = bar_rect.collidepoint(mx, my)
+
+
+    # OPENING LOGIC
+    if map_hover_state == "idle":
+        if hovering and not map_open and map_toggle_cooldown <= 0:
+            map_open = True
+            map_hover_state = "opened"
+            map_toggle_cooldown = cooldown_time
+            print("[MAP] OPEN via hover")
+
+            if MAP_OPEN_SOUND:
+                MAP_OPEN_SOUND.play()
+
+
+    # TRANSITION TO READY-TO-CLOSE
+    if map_hover_state == "opened" and mx < leave_zone_x:
+        map_hover_state = "left"
+
+    # CLOSING LOGIC
+    if map_hover_state == "left":
+        if hovering and map_open and map_toggle_cooldown <= 0:
+            map_open = False
+            map_hover_state = "idle"
+            map_toggle_cooldown = cooldown_time
+            print("[MAP] CLOSE via re-hover")
+
+            if MAP_CLOSE_SOUND:
+                MAP_CLOSE_SOUND.play()
+
+    # ---------- Draw the bar (always while camera is open) ----------
+    bar_rect = pygame.Rect(WIDTH - BAR_W, map_hover_y, BAR_W, BAR_H)
+    pygame.draw.rect(surface, (40, 90, 160), bar_rect, border_radius=12)
+
+    # arrow pointing left
+    pygame.draw.polygon(surface, (220, 240, 255), [
+        (bar_rect.left + 12, bar_rect.centery),
+        (bar_rect.right - 12, bar_rect.centery - 20),
+        (bar_rect.right - 12, bar_rect.centery + 20)
+    ])
 
 
 
@@ -1298,7 +1048,7 @@ pygame.mixer.music.set_volume(1.0)
 
 # ----- Main loop -----
 def main():
-    global game_over, camera_bar_y, click_once, camera_bar_target_y, map_open, map_layer, jumpscare_time,night_timer, camera_index, power, cam_toggle_cooldown, camera_active, camera_button_rect, STATIC_OVERLAY, cam_show_timer, STATIC_FRAME_TIMER, STATIC_FRAME_INDEX, static_alpha, static_target_alpha, jumpscare_active, office_locked, fade, CAM_BAR_ACTIVE_COLOR, CAM_BAR_COLOR, CAM_BAR_FONT, CAM_BAR_HEIGHT, CAM_BAR_TEXT_COLOR, cam_hovered
+    global game_over, camera_bar_y, click_once, camera_bar_target_y, map_open, map_layer, jumpscare_time,night_timer, camera_index, power, STATIC_FRAMES, cam_toggle_cooldown, camera_active, camera_button_rect, STATIC_OVERLAY, cam_show_timer, STATIC_FRAME_TIMER, STATIC_FRAME_INDEX, static_alpha, static_target_alpha, jumpscare_active, office_locked, fade, CAM_BAR_ACTIVE_COLOR, CAM_BAR_COLOR, CAM_BAR_FONT, CAM_BAR_HEIGHT, CAM_BAR_TEXT_COLOR, cam_hovered
     running = True
     last_time = pygame.time.get_ticks()
     flicker_timer = 0.0
@@ -1312,21 +1062,12 @@ def main():
     door_closed = False
     ambient_timer = random.uniform(20.0, 30.0)  # initial random delay before first ambient
     # --- Initialize animatronics (before main loop) ---
-    rainer = Animatronic("Rainer", "Stage")
-    fliege = Animatronic("Fliege", "Kitchen")
-    animatronics = [rainer, fliege]
     camera_booting = False
     camera_boot_timer = 0.0
     cam_toggle_cooldown = 0.0
     current_camera_name = "1A"
-    animatronics = [rainer, fliege]
-    # --- Initialize Animatronics ---
-    rainer = Animatronic("Rainer", start_room="Stage", route=ANIMATRONIC_PATHS["Rainer"])
-    fliege = Animatronic("Fliege", start_room="Kitchen", route=ANIMATRONIC_PATHS["Fliege"])
     jumpscare_active = False
-    animatronics = [rainer, fliege]
     office_locked = False
-    animatronics = [rainer, fliege]
     # --- Camera tablet hover system ---
     CAM_BAR_HEIGHT = 60
     CAM_BAR_COLOR = (10, 10, 10)
@@ -1405,17 +1146,9 @@ def main():
             pass
 
 
-    # --- Initialize Animatronics ---
-    rainer = Animatronic("Rainer", "Stage")
-    fliege = Animatronic("Fliege", "Kitchen")
-
     # Optional: slight speed variation
     rainer.speed = random.uniform(45, 65)
     fliege.speed = random.uniform(55, 70)
-
-    # Register them globally
-    ANIMATRONICS = [rainer, fliege]
-
 
     # --- Start background ambiance when the night begins (with fade-in) ---
     if BACKGROUND_LOOP:
@@ -1511,6 +1244,21 @@ def main():
             # survive the night!
             print("You survived the night!")
             running = False
+            
+        # Update night clock
+        elapsed = time.time() - night_start_time
+        progress = elapsed / night_length
+
+        # Convert progress (0.0 → 1.0) to hours
+        # 12 AM → 1 AM → 2 AM → ... → 6 AM (6 stages)
+        hours = int(progress * 6)
+
+        clock_labels = ["12 AM", "1 AM", "2 AM", "3 AM", "4 AM", "5 AM", "6 AM"]
+
+        if hours < len(clock_labels):
+            current_hour = clock_labels[hours]
+        else:
+            current_hour = "6 AM"  # just to be safe
 
         # update animatronics
         for a in animatronics:
@@ -1552,6 +1300,7 @@ def main():
                 running = False
                 break
 
+
         # --- Smooth fade for static overlay ---
         if static_alpha < static_target_alpha:
             static_alpha = min(static_alpha + static_fade_speed * dt, static_target_alpha)
@@ -1559,60 +1308,26 @@ def main():
             static_alpha = max(static_alpha - static_fade_speed * dt, static_target_alpha)
 
 
-        if camera_active and click_once:
+        if camera_active and map_open and click_once:
             mx, my = pygame.mouse.get_pos()
 
-            # ---- Camera UI buttons ----
-            for rect, cam_name in CAM_BUTTON_RECTS:
+            # Layer switch buttons
+            if MAP_TOP_RECT.collidepoint(mx, my):
+                map_layer = 1
+                click_once = False
+
+            elif MAP_BOTTOM_RECT.collidepoint(mx, my):
+                map_layer = 0
+                click_once = False
+
+            # Camera switching
+            for rect, cam_name in CAM_MAP_RECTS:
                 if rect.collidepoint(mx, my):
                     camera_index = CAMERA_ORDER.index(cam_name)
                     current_camera_name = cam_name
-                    print("[UI] Camera switched:", cam_name)
+                    if CAMERA_SWITCH_SOUND: CAMERA_SWITCH_SOUND.play()
                     click_once = False
-                    continue
-
-            # ---- MAP BUTTON ----
-            if MAP_UI_RECT and MAP_UI_RECT.collidepoint(mx, my):
-                map_open = not map_open
-                print("[UI] MAP toggled:", map_open)
-                click_once = False
-                continue
-
-
-            if map_open:
-                # --- TOP layer button ---
-                if MAP_TOP_RECT and MAP_TOP_RECT.collidepoint(mx, my):
-                    map_layer = 1     # <--- TOP = 1
-                    print("[MAP] Switched to TOP")
-                    click_once = False
-                    continue
-
-                # --- BOTTOM layer button ---
-                if MAP_BOTTOM_RECT and MAP_BOTTOM_RECT.collidepoint(mx, my):
-                    map_layer = 0     # <--- BOTTOM = 0
-                    print("[MAP] Switched to BOTTOM")
-                    click_once = False
-                    continue
-
-
-                # 3. MAP CLOSE button
-                if MAP_CLOSE_RECT and MAP_CLOSE_RECT.collidepoint(mx, my):
-                    map_open = False
-                    click_once = False
-                    print("[MAP] Closed")
-                    continue
-
-                # 4. Camera icons on the map
-                for rect, cam_name in CAM_MAP_RECTS:
-                    if rect.collidepoint(mx, my):
-                        camera_index = CAMERA_ORDER.index(cam_name)
-                        current_camera_name = cam_name
-                        print("[MAP] Switched to", cam_name)
-                        click_once = False
-                        break
-
-
-
+                    break
 
 
 
@@ -1620,119 +1335,101 @@ def main():
 
         # draw .............................................................................................................................................................................
         SCREEN.fill((10,10,10))
-        # center large camera view
+
+        # Center large camera view (base image)
         big_room = ROOMS[CAMERA_ORDER[camera_index]]
         big_view = big_room.view_surface.copy()
 
-        # --- Fade the static in/out smoothly ---
-        fade_speed = 100 * dt  # how fast to fade
+        # Ensure STATIC_FRAMES has at least one fallback frame
+        if not STATIC_FRAMES:
+            # create a subtle fallback static frame so nothing crashes / everything blits
+            fallback = pygame.Surface((1280, 720), pygame.SRCALPHA)
+            fallback.fill((30, 30, 30))
+            STATIC_FRAMES = [fallback]
+            STATIC_FRAME_INDEX = 0
+            STATIC_FRAME_TIMER = 0.0
+
+        # Update static animation timer (global 1080p static)
+        if CAMERA_ORDER[camera_index] != "Office" and STATIC_FRAMES:
+            STATIC_FRAME_TIMER += dt
+            if STATIC_FRAME_TIMER > 0.05:
+                STATIC_FRAME_INDEX = (STATIC_FRAME_INDEX + 1) % len(STATIC_FRAMES)
+                STATIC_FRAME_TIMER = 0.0
+
+        # Calculate static alpha target and smooth current
+        # (target_alpha is 255 when camera open, 0 when closed — static_alpha is used for overlays)
         target_alpha = 255 if camera_active else 0
         if static_alpha < target_alpha:
-            static_alpha = min(static_alpha + fade_speed, target_alpha)
+            static_alpha = min(static_alpha + 100 * dt, target_alpha)
         elif static_alpha > target_alpha:
-            static_alpha = max(static_alpha - fade_speed, target_alpha)
+            static_alpha = max(static_alpha - 100 * dt, target_alpha)
 
-        # --- Camera flicker and static ---
+        # If camera is active, draw camera UI (either map or feed)
+        MAP_TOP_RECT = MAP_BOTTOM_RECT = MAP_CLOSE_RECT = None
+
+        # Draw night clock at the top-center of the screen
+        font_clock = pygame.font.Font("../assets/fonts/pixel_font.ttf", 48)
+        clock_text = font_clock.render(current_hour, True, (255, 255, 255))
+        SCREEN.blit(clock_text, (WIDTH // 2 - clock_text.get_width() // 2, 30))
+
+
         if camera_active:
-
-            # --- MAP VIEW ---
+            # If map is open: draw the map overlay centered
             if map_open:
                 MAP_TOP_RECT, MAP_BOTTOM_RECT, MAP_CLOSE_RECT = draw_map_overlay(SCREEN)
-
-
-            # --- NORMAL CAMERA FEED ---
             else:
-                big_room = ROOMS[CAMERA_ORDER[camera_index]]
-                big_view = big_room.view_surface.copy()
-                draw_camera_side_panel(SCREEN, camera_active)
-
-                # render animatronics onto feed
+                # Normal camera feed: render animatronics onto feed before scaling
                 drawn_rooms = set()
                 for a in animatronics:
                     if a.current_room == big_room.name and a.visible and a.current_room not in drawn_rooms:
                         anim_img = a.get_room_image()
+                        # blit to big_view using same coordinates — you may need to adjust coordinates
                         big_view.blit(anim_img, (0, 0))
                         drawn_rooms.add(a.current_room)
 
+                # Scale and blit camera feed into the "tablet" area
                 big_scaled = pygame.transform.scale(big_view, (1280, 720))
                 SCREEN.blit(big_scaled, (WIDTH//2 - 640, HEIGHT//2 - 360))
 
-
-
-                # --- Animated static overlay for 1080p (with fade) ---
-            if CAMERA_ORDER[camera_index] != "Office" and STATIC_FRAMES:
-                STATIC_FRAME_TIMER += dt
-                if STATIC_FRAME_TIMER > 0.05:
-                    STATIC_FRAME_INDEX = (STATIC_FRAME_INDEX + 1) % len(STATIC_FRAMES)
-                    STATIC_FRAME_TIMER = 0.0
-
-            static_frame = pygame.transform.scale(
-                STATIC_FRAMES[STATIC_FRAME_INDEX], (1280, 720)
-            ).convert_alpha()
-
-            translucent_static = pygame.Surface(static_frame.get_size(), pygame.SRCALPHA)
-            translucent_static.blit(static_frame, (0, 0))
-           
-                
-            translucent_static.set_alpha(int(static_alpha * 0.25))  # fade amount
-
-            SCREEN.blit(translucent_static, (WIDTH // 2 - 640, HEIGHT // 2 - 360))
-
-
-            # --- Animated static overlay for 1080p ---
-            if camera_active and CAMERA_ORDER[camera_index] != "Office" and STATIC_FRAMES:
-                STATIC_FRAME_TIMER += dt
-                if STATIC_FRAME_TIMER > 0.05:
-                    STATIC_FRAME_INDEX = (STATIC_FRAME_INDEX + 1) % len(STATIC_FRAMES)
-                    STATIC_FRAME_TIMER = 0.0
-
-                static_frame = pygame.transform.scale(
-                    STATIC_FRAMES[STATIC_FRAME_INDEX], (1280, 720)
-                ).convert_alpha()  # make sure it's using per-pixel alpha
-
-                # --- custom transparent blend ---
+            # Draw static overlay on top of camera/map if any
+            try:
+                static_frame = pygame.transform.scale(STATIC_FRAMES[STATIC_FRAME_INDEX], (1280, 720)).convert_alpha()
                 translucent_static = pygame.Surface(static_frame.get_size(), pygame.SRCALPHA)
                 translucent_static.blit(static_frame, (0, 0))
-                translucent_static.set_alpha(int(static_alpha * 0.05))  # only half opacity for subtle static
+            except Exception:
+                # fallback translucent static surface when something's wrong
+                translucent_static = pygame.Surface((1280, 720), pygame.SRCALPHA)
+                translucent_static.fill((0, 0, 0, 0))
 
-                SCREEN.blit(translucent_static, (WIDTH // 2 - 640, HEIGHT // 2 - 360))
+            # Use static_alpha to control opacity (smaller factor for subtle effect)
+            # Clamp safe values
+            alpha_val = max(0, min(255, int(static_alpha * 0.25)))
+            translucent_static.set_alpha(alpha_val)
+            SCREEN.blit(translucent_static, (WIDTH // 2 - 640, HEIGHT // 2 - 360))
 
-            if camera_active:
-                if camera_booting:
-                    camera_boot_timer -= dt
+            # If camera booting, show full-screen static overlay (existing variable STATIC_OVERLAY expected)
+            if camera_booting:
+                camera_boot_timer -= dt
+                if 'STATIC_OVERLAY' in globals() and STATIC_OVERLAY:
                     STATIC_OVERLAY.set_alpha(180)
                     SCREEN.blit(STATIC_OVERLAY, (0, 0))
-                    if camera_boot_timer <= 0:
-                        camera_booting = False
-                else:
-                    draw_camera_overlay(SCREEN, current_camera_name, booting=camera_booting)
-
-
+                if camera_boot_timer <= 0:
+                    camera_booting = False
+            else:
+                # Draw camera overlay HUD (REC, vignette, etc.)
+                draw_camera_overlay(SCREEN, current_camera_name, booting=camera_booting)
 
         else:
-            if not camera_active:
-                # --- Draw the office ---
-                office_surface = OFFICE_BASE.copy()
-                
+            # camera not active: draw office world
+            office_surface = OFFICE_BASE.copy()
+            if door_closed:
+                office_surface.blit(DOOR_CLOSED_IMG, (0, 0))
+            for a in animatronics:
+                if a.current_room == "Office" and a.visible:
+                    a.draw_on_surface(office_surface)
+            office_scaled = pygame.transform.scale(office_surface, (WIDTH, HEIGHT))
+            SCREEN.blit(office_scaled, (0, 0))
 
-
-                # --- Draw closed door overlay ---
-                if door_closed:
-                    office_surface.blit(DOOR_CLOSED_IMG, (0, 0))  # adjust coordinates if needed
-
-                # --- Draw any animatronics visible in the office ---
-                for a in animatronics:
-                    if a.current_room == "Office" and a.visible:
-                        a.draw_on_surface(office_surface)
-
-
-                # draw any animatronics visible in the office (like jumpscare proximity)
-                for a in animatronics:
-                    if a.current_room == "Office" and a.visible:
-                        a.draw_on_surface(office_surface)
-
-                office_scaled = pygame.transform.scale(office_surface, (WIDTH, HEIGHT))
-                SCREEN.blit(office_scaled, (0, 0))
 
 
 
@@ -1785,10 +1482,7 @@ def main():
                 surface.blit(flicker_overlay, (0, 0))
 
 
-
         draw_camera_overlay(SCREEN, current_camera_name, booting=camera_booting)
-
-
 
         #blackout
         if power <= 0:
@@ -1807,6 +1501,9 @@ def main():
 
         mx, my = pygame.mouse.get_pos()
         draw_camera_hover_bar(SCREEN, my, dt)
+        if camera_active:
+            draw_map_hover_bar(SCREEN, my, dt)
+
 
         pygame.display.flip()
 
@@ -1817,3 +1514,4 @@ if __name__ == "__main__":
     main_menu()
     show_night_intro(SCREEN, "Night 1")
     main()
+    
