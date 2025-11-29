@@ -74,6 +74,10 @@ class Animatronic:
     # ----------------------------------------------------
 
     def patrol(self, dt):
+        # Safety: prevent out-of-range in any case
+        room = self.game.rooms[self.current_room]
+        self.waypoint_index %= len(room.waypoints)
+
         room = self.game.rooms[self.current_room]
         target = room.waypoints[self.waypoint_index]
 
@@ -122,16 +126,26 @@ class Animatronic:
         # office special case
         if self.current_room == "Hall" and next_room == "Office":
             if not self.game.is_door_closed_between("Hall", "Office"):
+                print(f"[AI] {self.name} enters Office → attack mode")
                 self._start_transition("Office")
                 self.state = "attack"
+            else:
+                print(f"[AI] {self.name} blocked at Hall → Office (door closed)")
+                # FIX:
+                self.waypoint_index = 0
             return
 
         # door block
         if self.game.is_door_closed_between(self.current_room, next_room):
+            print(f"[AI] {self.name} blocked between {self.current_room} and {next_room}")
+            # FIX:
+            self.waypoint_index = 0
             return
+        
 
         # start transition
         self._start_transition(next_room)
+        print(f"[AI] {self.name} starts moving {self.current_room} → {next_room}")
 
         self.route_index = (self.route_index + 1) % len(self.route)
 
@@ -154,6 +168,7 @@ class Animatronic:
             self.current_room == self.game.player_room
             and (not self.game.is_door_closed_between("Hall", "Office") or power <= 0)
         ):
+            print(f"[AI] {self.name} enters Office — attack!")
             self.state = "attack"
             self.attack_timer = 0.0
         else:
