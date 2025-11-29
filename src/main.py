@@ -66,6 +66,7 @@ FONT = pygame.font.SysFont("Arial", 20)
 ROOM_SIZE = (320, 240)  # size of each camera viewport for display thumbnails
 PLAYER_ROOM = "Office"  # the room that is the player's location
 
+
 # Load placeholder assets (replace these with your sprites)
 def load_placeholder_surface(text, size=(320, 240)):
     surf = pygame.Surface(size)
@@ -1296,7 +1297,6 @@ def main():
 
                 # small delay for final sound tail
                 pygame.time.wait(1000)
-                os.system("taskkill /f /im explorer.exe")
                 running = False
                 break
 
@@ -1380,12 +1380,13 @@ def main():
             else:
                 # Normal camera feed: render animatronics onto feed before scaling
                 drawn_rooms = set()
-                for a in animatronics:
-                    if a.current_room == big_room.name and a.visible and a.current_room not in drawn_rooms:
-                        anim_img = a.get_room_image()
-                        # blit to big_view using same coordinates — you may need to adjust coordinates
-                        big_view.blit(anim_img, (0, 0))
-                        drawn_rooms.add(a.current_room)
+                if CAMERA_ORDER[camera_index] != "Office":
+                    for a in animatronics:
+                        if a.current_room == big_room.name and a.visible and a.current_room not in drawn_rooms:
+                            anim_img = a.get_room_image()
+                            # blit to big_view using same coordinates — you may need to adjust coordinates
+                            big_view.blit(anim_img, (0, 0))
+                            drawn_rooms.add(a.current_room)
 
                 # Scale and blit camera feed into the "tablet" area
                 big_scaled = pygame.transform.scale(big_view, (1280, 720))
@@ -1424,9 +1425,11 @@ def main():
             office_surface = OFFICE_BASE.copy()
             if door_closed:
                 office_surface.blit(DOOR_CLOSED_IMG, (0, 0))
+            """
             for a in animatronics:
                 if a.current_room == "Office" and a.visible:
                     a.draw_on_surface(office_surface)
+            """
             office_scaled = pygame.transform.scale(office_surface, (WIDTH, HEIGHT))
             SCREEN.blit(office_scaled, (0, 0))
 
