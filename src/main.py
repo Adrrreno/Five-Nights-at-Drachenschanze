@@ -51,11 +51,83 @@ hour_offsets = [
 
 click_once = False
 
+
+# --- Display & Aspect Handling ------------------------------------------------
 pygame.init()
 pygame.mixer.init()
-WIDTH, HEIGHT = 1920, 1080
-SCREEN = pygame.display.set_mode((WIDTH, HEIGHT))
+
+# Virtuelle Basisauflösung (alles im Spiel bleibt in diesen Koordinaten)
+VIRTUAL_W, VIRTUAL_H = 1920, 1080
+WIDTH, HEIGHT = VIRTUAL_W, VIRTUAL_H  # viele Stellen nutzen WIDTH/HEIGHT => lassen wir so
+
+# Aktuelle Aspect-Einstellung (wird im Menü geändert)
+ASPECT_MODE = '16:9'  # Optionen: '16:9' oder '16:10'
+
+def compute_window_size(aspect: str) -> tuple[int, int]:
+    """Wählt eine fensterfreundliche Größe im gewünschten Seitenverhältnis,
+    die gut auf den Monitor passt (ca. 90% Höhe)."""
+    info = pygame.display.Info()
+    max_w, max_h = info.current_w, info.current_h
+    ratio = (16/9) if aspect == '16:9' else (16/10)
+
+    # starte mit Höhe ~90% des Bildschirms
+    target_h = int(min(max_h * 0.9, VIRTUAL_H))
+    target_w = int(target_h * ratio)
+
+    # ggf. Breite begrenzen
+    if target_w > max_w * 0.9:
+        target_w = int(max_w * 0.9)
+        target_h = int(target_w / ratio)
+    # Minimum, falls winzig
+    target_w = max(960, target_w)
+    target_h = max(int(960/ratio), target_h)
+    return target_w, target_h
+
+# Tatsächliches Fenster (Anzeige)
+WINDOW_W, WINDOW_H = compute_window_size(ASPECT_MODE)
+WINDOW = pygame.display.set_mode((WINDOW_W, WINDOW_H), pygame.RESIZABLE)
 pygame.display.set_caption("Fünf Nächte beim Drachen")
+
+# Offscreen-Renderziel in 1920x1080: DARAUF zeichnet das ganze Spiel!
+SCREEN = pygame.Surface((VIRTUAL_W, VIRTUAL_H)).convert()
+
+def present():
+    """Skaliert die 1920x1080-Offscreenfläche verlustfrei auf WINDOW und letterboxt."""
+    w, h = WINDOW.get_size()
+    scale = min(w / VIRTUAL_W, h / VIRTUAL_H)
+    sw, sh = int(VIRTUAL_W * scale), int(VIRTUAL_H * scale)
+    x, y = (w - sw) // 2, (h - sh) // 2
+    frame = pygame.transform.smoothscale(SCREEN, (sw, sh))
+    WINDOW.fill((0, 0, 0))
+    WINDOW.blit(frame, (x, y))
+    pygame.display.flip()
+
+
+
+def window_to_virtual(pos):
+    mx, my = pos
+    w, h = WINDOW.get_size()
+    scale = min(w / VIRTUAL_W, h / VIRTUAL_H)
+    sw, sh = int(VIRTUAL_W * scale), int(VIRTUAL_H * scale)
+    ox, oy = (w - sw) // 2, (h - sh) // 2  # Offsets der Letterbox/Pillarbox
+
+    inside = (ox <= mx < ox + sw) and (oy <= my < oy + sh)
+    vx = (mx - ox) / scale
+    vy = (my - oy) / scale
+    return int(vx), int(vy), inside
+
+
+
+def apply_aspect(mode: str):
+    """
+    Setzt das Fenster neu im gewünschten Seitenverhältnis.
+    """
+    global ASPECT_MODE, WINDOW, WINDOW_W, WINDOW_H
+    ASPECT_MODE = mode
+    WINDOW_W, WINDOW_H = compute_window_size(ASPECT_MODE)
+    WINDOW = pygame.display.set_mode((WINDOW_W, WINDOW_H), pygame.RESIZABLE)
+   
+
 
 last_mouse_pressed = False
 
@@ -717,6 +789,7 @@ def drain_power(dt, camera_on):
     return max(power - total_drain * 60 * dt, 0)
 
 
+
 def main_menu():
     # --- Load menu music ---
     menu_music = safe_load_sound("../assets/sounds/menu_theme.wav")
@@ -725,9 +798,9 @@ def main_menu():
         menu_music.play(-1)
 
     # --- Fonts ---
-    title_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 64)
+    title_font  = pygame.font.Font("../assets/fonts/pixel_font.ttf", 64)
     button_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 28)
-    info_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 32)
+    info_font   = pygame.font.Font("../assets/fonts/pixel_font.ttf", 32)
 
     # --- Build STATIC frames ---
     if STATIC_FRAMES:
@@ -755,12 +828,15 @@ def main_menu():
     rainer_alpha = 0
 
     # Buttons
-    start_rect = pygame.Rect(WIDTH//2 - 150, HEIGHT//2, 300, 80)
-    controls_rect = pygame.Rect(WIDTH//2 - 150, HEIGHT//2 + 120, 300, 80)
-    quit_rect = pygame.Rect(WIDTH//2 - 150, HEIGHT//2 + 240, 300, 80)
-    back_rect = pygame.Rect(WIDTH//2 - 150, HEIGHT - 200, 300, 80)
+    start_rect    = pygame.Rect(WIDTH//2 - 150, HEIGHT//2,            300, 80)
+    graphics_rect = pygame.Rect(WIDTH//2 - 150, HEIGHT//2 + 120,      300, 80)
+    controls_rect = pygame.Rect(WIDTH//2 - 150, HEIGHT//2 + 240,      300, 80)
+    quit_rect     = pygame.Rect(WIDTH//2 - 150, HEIGHT//2 + 360,      300, 80)
+    back_rect     = pygame.Rect(WIDTH//2 - 150, HEIGHT - 200,         300, 80)
 
     in_controls_menu = False
+    in_graphics_menu = False
+
     running = True
 
     # -------- BUTTON DRAW --------
@@ -796,10 +872,9 @@ def main_menu():
             rect.centery - label.get_height()//2 + offset_y
         ))
 
-
     # -------- MAIN MENU LOOP --------
     while running:
-        dt = CLOCK.tick(60)/1000.0
+        dt = CLOCK.tick(60) / 1000.0
 
         # --- static animation ---
         frame_timer += dt
@@ -808,20 +883,26 @@ def main_menu():
             frame_index = (frame_index + 1) % len(static_frames)
 
         static_surface = static_frames[frame_index].copy()
-        static_surface.set_alpha(50)     # 50 = transparent static (old style)
+        static_surface.set_alpha(50)  # transparent static
         SCREEN.blit(static_surface, (0, 0))
-
 
         # --- dark overlay ---
         dark = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         dark.fill((0, 0, 0, 80))
-        SCREEN.blit(dark, (0,0))
+        SCREEN.blit(dark, (0, 0))
 
         # --- scanlines ---
         if 'SCANLINE_OVERLAY' in globals() and SCANLINE_OVERLAY:
-            SCREEN.blit(SCANLINE_OVERLAY, (0,0))
+            SCREEN.blit(SCANLINE_OVERLAY, (0, 0))
 
-        mx, my = pygame.mouse.get_pos()
+        
+        vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos())
+
+        if inside:
+            mx, my = vmx, vmy
+        else:
+            mx, my = -99999, -99999
+
 
         # --- Rainer flash ---
         rainer_timer -= dt
@@ -833,9 +914,9 @@ def main_menu():
             rainer_alpha = max(0, rainer_alpha - 300 * dt)
             temp = rainer_img.copy()
             temp.set_alpha(int(rainer_alpha))
-            SCREEN.blit(temp, (0,0))
+            SCREEN.blit(temp, (0, 0))
 
-        # -------- CONTROL SCREEN --------
+        # -------- CONTROLS SCREEN --------
         if in_controls_menu:
             header = title_font.render("Controls", True, (255, 255, 255))
             SCREEN.blit(header, (WIDTH//2 - header.get_width()//2, 120))
@@ -846,24 +927,60 @@ def main_menu():
                 "Hover bottom arrow : Open camera monitor",
                 "ESC  : Quit game"
             ]
-
             y = 300
             for line in lines:
                 t = info_font.render(line, True, (220, 220, 220))
                 SCREEN.blit(t, (WIDTH//2 - t.get_width()//2, y))
                 y += 60
 
-            draw_button(back_rect, "Back", back_rect.collidepoint(mx,my))
+            draw_button(back_rect, "Back", back_rect.collidepoint(mx, my))
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit(); sys.exit()
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    if back_rect.collidepoint(mx,my):
+                    if back_rect.collidepoint(mx, my):
                         in_controls_menu = False
 
-            pygame.display.flip()
-            continue
+            present()
+            continue  # bleibt IM while-running-Loop
+
+        # -------- GRAPHICS SCREEN (NEU) --------
+        if in_graphics_menu:
+            header = title_font.render("Graphics", True, (255, 255, 255))
+            SCREEN.blit(header, (WIDTH//2 - header.get_width()//2, 120))
+
+            # Aspect-Buttons
+            aspect_169_rect  = pygame.Rect(WIDTH//2 - 320, 320, 260, 80)
+            aspect_1610_rect = pygame.Rect(WIDTH//2 +  60, 320, 260, 80)
+
+            is_169  = (ASPECT_MODE == '16:9')
+            is_1610 = (ASPECT_MODE == '16:10')
+
+            draw_button(aspect_169_rect,  "Aspect: 16:9" , aspect_169_rect.collidepoint(mx, my)  or is_169)
+            draw_button(aspect_1610_rect, "Aspect: 16:10", aspect_1610_rect.collidepoint(mx, my) or is_1610)
+
+            info_txt = info_font.render(
+                f"Window: {WINDOW.get_width()}x{WINDOW.get_height()}  (virtual 1920x1080)",
+                True, (200, 200, 200)
+            )
+            SCREEN.blit(info_txt, (WIDTH//2 - info_txt.get_width()//2, 450))
+
+            draw_button(back_rect, "Back", back_rect.collidepoint(mx, my))
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit(); sys.exit()
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if back_rect.collidepoint(mx, my):
+                        in_graphics_menu = False
+                    elif aspect_169_rect.collidepoint(mx, my):
+                        apply_aspect('16:9')
+                    elif aspect_1610_rect.collidepoint(mx, my):
+                        apply_aspect('16:10')
+
+            present()
+            continue  # bleibt IM while-running-Loop
 
         # -------- MAIN MENU SCREEN --------
         if random.random() < 0.03:
@@ -875,28 +992,30 @@ def main_menu():
         else:
             flicker_color = (255, 255, 255)
 
-
         title = title_font.render("FIVE NIGHTS AT DRACHENSCHANZE", True, flicker_color)
         SCREEN.blit(title, (WIDTH//2 - title.get_width()//2, HEIGHT//3))
 
         # Buttons
-        draw_button(start_rect, "Start Night", start_rect.collidepoint(mx,my))
-        draw_button(controls_rect, "Controls", controls_rect.collidepoint(mx,my))
-        draw_button(quit_rect, "Quit", quit_rect.collidepoint(mx,my))
+        draw_button(start_rect,    "Start Night", start_rect.collidepoint(mx, my))
+        draw_button(graphics_rect, "Graphics",    graphics_rect.collidepoint(mx, my))  # NEU
+        draw_button(controls_rect, "Controls",    controls_rect.collidepoint(mx, my))
+        draw_button(quit_rect,     "Quit",        quit_rect.collidepoint(mx, my))
 
         # --- EVENT HANDLING ---
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit(); sys.exit()
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if start_rect.collidepoint(mx,my):
+                if start_rect.collidepoint(mx, my):
                     running = False
-                elif controls_rect.collidepoint(mx,my):
+                elif graphics_rect.collidepoint(mx, my):    # NEU
+                    in_graphics_menu = True                 # NEU
+                elif controls_rect.collidepoint(mx, my):
                     in_controls_menu = True
-                elif quit_rect.collidepoint(mx,my):
+                elif quit_rect.collidepoint(mx, my):
                     pygame.quit(); sys.exit()
 
-        pygame.display.flip()
+        present()
 
     if menu_music:
         menu_music.fadeout(1500)
@@ -1036,11 +1155,11 @@ def show_night_intro(screen, text="Night 1", duration=3.0):
         fade_surface.set_alpha(alpha)
         screen.blit(fade_surface, (0, 0))
 
-        pygame.display.flip()
+        present()
 
     # after fade, transition back to black
     screen.fill((0, 0, 0))
-    pygame.display.flip()
+    present()
     pygame.time.wait(500)
 
 pygame.mixer.set_num_channels(16)
@@ -1135,7 +1254,7 @@ def main():
 
             # --- Then overlay the jumpscare frame with alpha ---
             SCREEN.blit(surf, (0, 0))
-            pygame.display.flip()
+            present()
             clock.tick(30)
 
         clip.close()
@@ -1289,7 +1408,7 @@ def main():
                 for alpha in range(0, 255, 8):
                     fade_surface.set_alpha(alpha)
                     SCREEN.blit(fade_surface, (0, 0))
-                    pygame.display.flip()
+                    present()
                     pygame.time.wait(20)
 
                 print("GAME OVER - Player jumpscared.")
@@ -1508,7 +1627,7 @@ def main():
             draw_map_hover_bar(SCREEN, my, dt)
 
 
-        pygame.display.flip()
+        present()
 
     pygame.quit()
     sys.exit()
