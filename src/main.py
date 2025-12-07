@@ -104,12 +104,19 @@ def present():
 
 
 
+
 def window_to_virtual(pos):
+    """
+    Mappt Fensterkoords (Maus) auf die virtuelle 1920x1080-Renderfläche.
+    Rückgabe: (vx, vy, inside):
+      vx, vy  ... Maus in virtuellen Koordinaten
+      inside  ... True, wenn Maus im sichtbaren Frame liegt (ohne Letterbox-Balken)
+    """
     mx, my = pos
     w, h = WINDOW.get_size()
     scale = min(w / VIRTUAL_W, h / VIRTUAL_H)
     sw, sh = int(VIRTUAL_W * scale), int(VIRTUAL_H * scale)
-    ox, oy = (w - sw) // 2, (h - sh) // 2  # Offsets der Letterbox/Pillarbox
+    ox, oy = (w - sw) // 2, (h - sh) // 2  # Offsets durch Letterbox/Pillarbox
 
     inside = (ox <= mx < ox + sw) and (oy <= my < oy + sh)
     vx = (mx - ox) / scale
@@ -415,116 +422,87 @@ def draw_map_buttons(surface, x, y):
             map_layer = 1
             print("Switched to BOTTOM layer")
 
-def draw_map_camera_buttons(surface, map_x, map_y):
-    global CAM_MAP_RECTS, camera_index, map_layer
 
-    CAM_MAP_RECTS = []  # Reset each frame
+
+def draw_map_camera_buttons(surface, map_x, map_y):
+    """
+    Zeichnet die Kamera-Buttons auf der Map. Maus virtuell mappen + inside beachten.
+    """
+    global CAM_MAP_RECTS, camera_index, map_layer
+    CAM_MAP_RECTS = []
 
     btn_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 28)
 
-    for cam_name, data in CAM_MAP_BUTTON_POS.items():
-        pos = data["pos"]
-        layer = data["layer"]
+    vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos())
 
-        # Skip if this camera is NOT on the currently selected layer
+    for cam_name, data in CAM_MAP_BUTTON_POS.items():
+        px, py = data["pos"]
+        layer  = data["layer"]
         if layer != map_layer:
             continue
 
-        px, py = pos
-
-        # Button rectangle
         rect = pygame.Rect(map_x + px - 25, map_y + py - 25, 50, 50)
-
-        mx, my = pygame.mouse.get_pos()
-        hovered = rect.collidepoint(mx, my)
+        hovered    = bool(inside) and rect.collidepoint(vmx, vmy)
         active_cam = (CAMERA_ORDER[camera_index] == cam_name)
 
-        # Color logic
-        if active_cam:
-            color = (200, 40, 40)     # active
-        elif hovered:
-            color = (150, 150, 150)   # hover
-        else:
-            color = (90, 90, 90)
-
+        color = (200, 40, 40) if active_cam else ((150, 150, 150) if hovered else (90, 90, 90))
         pygame.draw.rect(surface, color, rect, border_radius=12)
         pygame.draw.rect(surface, (20, 20, 20), rect, 3, border_radius=12)
 
-        # Label like 1A, 1B, 2, etc.
-        label = btn_font.render(CAM_LABELS[cam_name], True, (240, 240, 240))
-        surface.blit(label, (
-            rect.centerx - label.get_width() // 2,
-            rect.centery - label.get_height() // 2
-        ))
+        label = btn_font.render(CAM_LABELS.get(cam_name, cam_name[:2]), True, (240, 240, 240))
+        surface.blit(label, (rect.centerx - label.get_width() // 2,
+                             rect.centery - label.get_height() // 2))
 
         CAM_MAP_RECTS.append((rect, cam_name))
 
+
+
 def draw_map_overlay(surface):
     """
-    Draw the map overlay at centered position and return the three main button rects:
-    (top_rect, bottom_rect, close_rect). Also populates global CAM_MAP_RECTS.
-    Uses: MAP_TOP, MAP_BOTTOM, CAM_MAP_BUTTON_POS, CAMERA_ORDER, CAM_LABELS
-    Assumes map_layer is 0 (bottom) or 1 (top).
+    Map-Overlay mittig zeichnen (Buttons TOP/BOTTOM, Cam-Buttons usw.).
+    Maus wird hier auf virtuelle 1920x1080-Koords gemappt; Hover nur 'inside'.
     """
     global CAM_MAP_RECTS
-
     CAM_MAP_RECTS = []
 
-    # --- map position (matches your other code) ---
+    # --- map position (virtuell) ---
     map_x = WIDTH // 2 - 640
     map_y = HEIGHT // 2 - 360
 
-    # --- draw correct map image for current layer ---
     if map_layer == 1:
-        surface.blit(MAP_TOP, (map_x, map_y))
+        surface.blit(MAP_TOP,    (map_x, map_y))
     else:
         surface.blit(MAP_BOTTOM, (map_x, map_y))
 
-    # --- font for map UI ---
     MAP_FONT = pygame.font.Font("../assets/fonts/pixel_font.ttf", 32)
 
-    # --------------------------------------------------
-    # 1) TOP / BOTTOM layer buttons
-    # --------------------------------------------------
-    top_rect = pygame.Rect(map_x + 50, map_y + 30, 180, 50)
+    # -------- TOP/BOTTOM Buttons zeichnen (wie gehabt) --------
+    top_rect    = pygame.Rect(map_x +  50, map_y + 30, 180, 50)
     bottom_rect = pygame.Rect(map_x + 260, map_y + 30, 180, 50)
 
-    # button fill: highlight active layer
-    pygame.draw.rect(surface, (120, 50, 50) if map_layer == 1 else (60, 60, 60),
-                     top_rect, border_radius=8)
-    pygame.draw.rect(surface, (120, 50, 50) if map_layer == 0 else (60, 60, 60),
-                     bottom_rect, border_radius=8)
+    pygame.draw.rect(surface, (120, 50, 50) if map_layer == 1 else (60, 60, 60), top_rect,    border_radius=8)
+    pygame.draw.rect(surface, (120, 50, 50) if map_layer == 0 else (60, 60, 60), bottom_rect, border_radius=8)
 
     txt = MAP_FONT.render("TOP", True, (255, 255, 255))
-    surface.blit(txt, (top_rect.centerx - txt.get_width() // 2,
-                       top_rect.centery - txt.get_height() // 2))
-
+    surface.blit(txt, (top_rect.centerx - txt.get_width() // 2,    top_rect.centery - txt.get_height() // 2))
     txt = MAP_FONT.render("BOTTOM", True, (255, 255, 255))
-    surface.blit(txt, (bottom_rect.centerx - txt.get_width() // 2,
-                       bottom_rect.centery - txt.get_height() // 2))
+    surface.blit(txt, (bottom_rect.centerx - txt.get_width() // 2, bottom_rect.centery - txt.get_height() // 2))
 
-    # --------------------------------------------------
-    # 2) Camera buttons on the map (use CAM_MAP_BUTTON_POS)
-    # --------------------------------------------------
-    mx, my = pygame.mouse.get_pos()
+    # -------- Cam-Buttons (mit virtueller Maus) --------
+    vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos())
     btn_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 28)
 
     for cam_name, data in CAM_MAP_BUTTON_POS.items():
         px, py = data["pos"]
-        layer = data["layer"]
-
-        # only draw cameras for the currently visible layer
+        layer  = data["layer"]
         if layer != map_layer:
             continue
 
-        # rect positioned relative to map_x/map_y
         rect = pygame.Rect(map_x + px - 25, map_y + py - 25, 50, 50)
 
-        hovered = rect.collidepoint(mx, my)
-        # active if the current global camera points to this cam name
+        hovered    = bool(inside) and rect.collidepoint(vmx, vmy)
         active_cam = (CAMERA_ORDER[camera_index] == cam_name)
 
-        # color logic: active = red, hovered = light grey, default = dark grey
         if active_cam:
             color = (200, 40, 40)
         elif hovered:
@@ -535,27 +513,22 @@ def draw_map_overlay(surface):
         pygame.draw.rect(surface, color, rect, border_radius=12)
         pygame.draw.rect(surface, (20, 20, 20), rect, 3, border_radius=12)
 
-        # label (1A, 1B, 2, etc.) — fallback to short name if missing
         label_text = CAM_LABELS.get(cam_name, cam_name[:2])
         lbl = btn_font.render(label_text, True, (240, 240, 240))
         surface.blit(lbl, (rect.centerx - lbl.get_width() // 2,
                            rect.centery - lbl.get_height() // 2))
-
         CAM_MAP_RECTS.append((rect, cam_name))
 
-    # --------------------------------------------------
-    # 3) MAP close button (reuse camera UI MAP button area)
-    # --------------------------------------------------
+    # -------- MAP close button (wie gehabt) --------
     close_rect = pygame.Rect(WIDTH - 180, 120, 160, 60)
     pygame.draw.rect(surface, (40, 90, 130), close_rect, border_radius=10)
     pygame.draw.rect(surface, (20, 20, 20), close_rect, 3, border_radius=10)
-
     close_label = MAP_FONT.render("MAP", True, (255, 255, 255))
     surface.blit(close_label, (close_rect.centerx - close_label.get_width() // 2,
                                close_rect.centery - close_label.get_height() // 2))
 
-    # return rects so your main loop can capture them
     return top_rect, bottom_rect, close_rect
+
 
 def is_door_closed_between(room_a, room_b):
     key = (room_a, room_b) if (room_a, room_b) in DOORS else (room_b, room_a)
@@ -645,11 +618,19 @@ def draw_ui():
 
 
 def draw_camera_hover_bar(screen, mouse_y, dt):
+    """
+    Camera-Hover-Bar am unteren Rand.
+    Hinweis: 'mouse_y' wird NICHT mehr direkt verwendet; wir mappen die Fenstermaus
+    selbst auf virtuelle 1920x1080-Koordinaten, damit Hover/Toggles nicht off-center sind.
+    """
     global camera_active, camera_bar_y, camera_bar_target_y
     global last_hover_state, cam_toggle_cooldown, static_target_alpha
 
+    # --- virtuelle Maus holen (aus dem Fenster gemappt) ---
+    vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos())
+
     bar_height = 80
-    hover_zone = HEIGHT - 120        # The hover area
+    hover_zone = HEIGHT - 120        # virtuelle Koordinate (1920x1080)
     toggle_cooldown_time = 0.4       # Prevent double triggers
 
     # initialize missing globals
@@ -662,8 +643,8 @@ def draw_camera_hover_bar(screen, mouse_y, dt):
     if cam_toggle_cooldown > 0:
         cam_toggle_cooldown -= dt
 
-    # detect hover
-    hovering = mouse_y >= hover_zone
+    # detect hover – NUR wenn Maus im sichtbaren Frame liegt (nicht in den schwarzen Balken)
+    hovering = bool(inside) and (vmy >= hover_zone)
 
     # --- FNaF toggle logic ---
     if hovering and not last_hover_state and cam_toggle_cooldown <= 0:
@@ -678,22 +659,20 @@ def draw_camera_hover_bar(screen, mouse_y, dt):
             # Play camera open sound on dedicated channel
             if CAM_OPEN_SOUND:
                 CAM_OPEN_CHANNEL.play(CAM_OPEN_SOUND)
-
         else:
             static_target_alpha = 0
             print("[CAM] Monitor CLOSED")
-
             # Stop open sound immediately
             CAM_OPEN_CHANNEL.stop()
 
     # update last state
     last_hover_state = hovering
 
-    # slide animation
+    # slide animation (virtuell)
     camera_bar_target_y = HEIGHT - (bar_height if camera_active else 20)
     camera_bar_y += (camera_bar_target_y - camera_bar_y) * min(dt * 10, 1)
 
-    # draw bar background
+    # draw bar background (virtuell)
     bar_rect = pygame.Rect(0, camera_bar_y, WIDTH, bar_height)
     pygame.draw.rect(screen, (25, 25, 25), bar_rect)
 
@@ -1029,82 +1008,89 @@ map_cooldown = 0.0
 MAP_BAR_WIDTH = 60
 
 
+
 def draw_map_hover_bar(surface, mouse_y, dt):
     """
-    Right-side map hover bar that works exactly like the bottom camera bar.
-    Opens map on first hover.
-    Closes ONLY after the player fully leaves the bar, then hovers again.
+    Rechte Map-Hover-Bar, identisches Hover-/Toggle-Verhalten wie die Kamera-Tablet-Bar unten.
+    Signatur bleibt unverändert; 'mouse_y' wird intern nicht direkt verwendet.
+    Maus wird selbst aus Fensterkoords -> virtuelle 1920x1080 Koords gemappt.
     """
-
     global map_open, map_hover_y, map_hover_target_y
     global map_toggle_cooldown, map_hover_state
 
     BAR_W = 55
     BAR_H = 200
-    open_zone_x = WIDTH - 80     # must move mouse here to open
-    leave_zone_x = WIDTH - 260   # must leave this far to allow closing
+
+    # Virtuelle Zonen (in 1920x1080)
+    open_zone_x  = WIDTH - 80    # zum Öffnen rechts reinfahren
+    leave_zone_x = WIDTH - 260   # weit genug rausfahren, um schließen zu dürfen
+
     cooldown_time = 0.35
 
-    mx, my = pygame.mouse.get_pos()
+    # --- Maus virtualisieren & Sichtbarkeit checken ---
+    vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos())
 
-    # ---------- INIT GLOBALS ----------
+    # --- Init Globals (einmalig) ---
     if "map_hover_state" not in globals():
         map_hover_state = "idle"  # idle → opened → left → ready_to_close
-
     if "map_toggle_cooldown" not in globals():
-        map_toggle_cooldown = 0
-
+        map_toggle_cooldown = 0.0
     if "map_hover_y" not in globals():
-        map_hover_y = HEIGHT//2 - BAR_H//2
-
+        map_hover_y = HEIGHT // 2 - BAR_H // 2
     if "map_hover_target_y" not in globals():
-        map_hover_target_y = HEIGHT//2 - BAR_H//2
+        map_hover_target_y = HEIGHT // 2 - BAR_H // 2
 
-    # ---------- Cooldown ----------
+    # --- Cooldown ---
     if map_toggle_cooldown > 0:
         map_toggle_cooldown -= dt
 
+    # Bar-Rechteck (virtuell)
     bar_rect = pygame.Rect(WIDTH - BAR_W, map_hover_y, BAR_W, BAR_H)
-    hovering = bar_rect.collidepoint(mx, my)
 
+    # Hover gilt NUR, wenn Maus im sichtbaren Frame UND über dem Bar-Rechteck liegt
+    hovering = bool(inside) and bar_rect.collidepoint(vmx, vmy)
 
-    # OPENING LOGIC
+    # --- Öffnen (erste Hover-Aktion rechts) ---
     if map_hover_state == "idle":
-        if hovering and not map_open and map_toggle_cooldown <= 0:
+        if (inside and vmx >= open_zone_x) and (not map_open) and (map_toggle_cooldown <= 0):
             map_open = True
             map_hover_state = "opened"
             map_toggle_cooldown = cooldown_time
             print("[MAP] OPEN via hover")
-
             if MAP_OPEN_SOUND:
                 MAP_OPEN_SOUND.play()
 
-
-    # TRANSITION TO READY-TO-CLOSE
-    if map_hover_state == "opened" and mx < leave_zone_x:
+    # --- Übergang: erst weit rausfahren, bevor schließen erlaubt ---
+    if map_hover_state == "opened" and inside and (vmx < leave_zone_x):
         map_hover_state = "left"
 
-    # CLOSING LOGIC
+    # --- Schließen (zweite Hover-Aktion auf die Bar selbst) ---
     if map_hover_state == "left":
         if hovering and map_open and map_toggle_cooldown <= 0:
             map_open = False
             map_hover_state = "idle"
             map_toggle_cooldown = cooldown_time
             print("[MAP] CLOSE via re-hover")
-
             if MAP_CLOSE_SOUND:
                 MAP_CLOSE_SOUND.play()
 
-    # ---------- Draw the bar (always while camera is open) ----------
+    # --- Zeichnen der Bar (virtuell) ---
     bar_rect = pygame.Rect(WIDTH - BAR_W, map_hover_y, BAR_W, BAR_H)
     pygame.draw.rect(surface, (40, 90, 160), bar_rect, border_radius=12)
 
-    # arrow pointing left
-    pygame.draw.polygon(surface, (220, 240, 255), [
-        (bar_rect.left + 12, bar_rect.centery),
-        (bar_rect.right - 12, bar_rect.centery - 20),
-        (bar_rect.right - 12, bar_rect.centery + 20)
-    ])
+    # Pfeil nach links (Klammern korrekt + eigener Zeilenumbruch)
+    pygame.draw.polygon(
+        surface,
+        (220, 240, 255),
+        [
+            (bar_rect.left + 12, bar_rect.centery),
+            (bar_rect.right - 12, bar_rect.centery - 20),
+            (bar_rect.right - 12, bar_rect.centery + 20),
+        ],
+    )
+
+
+
 
 
 
@@ -1427,30 +1413,33 @@ def main():
             static_alpha = max(static_alpha - static_fade_speed * dt, static_target_alpha)
 
 
+
         if camera_active and map_open and click_once:
-            mx, my = pygame.mouse.get_pos()
+            # Virtuelle Mauskoordinaten aus dem Fenster mappen
+            vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos())
 
-            # Layer switch buttons
-            if MAP_TOP_RECT.collidepoint(mx, my):
-                map_layer = 1
-                click_once = False
-
-            elif MAP_BOTTOM_RECT.collidepoint(mx, my):
-                map_layer = 0
-                click_once = False
-
-            # Camera switching
-            for rect, cam_name in CAM_MAP_RECTS:
-                if rect.collidepoint(mx, my):
-                    camera_index = CAMERA_ORDER.index(cam_name)
-                    current_camera_name = cam_name
-                    if CAMERA_SWITCH_SOUND: CAMERA_SWITCH_SOUND.play()
+            if inside:
+                # Layer switch buttons
+                if MAP_TOP_RECT and MAP_TOP_RECT.collidepoint(vmx, vmy):
+                    map_layer = 1
                     click_once = False
-                    break
+                elif MAP_BOTTOM_RECT and MAP_BOTTOM_RECT.collidepoint(vmx, vmy):
+                    map_layer = 0
+                    click_once = False
 
+                # Camera switching (Cam-Buttons auf der Map)
+                for rect, cam_name in CAM_MAP_RECTS:
+                    if rect.collidepoint(vmx, vmy):
+                        camera_index = CAMERA_ORDER.index(cam_name)
+                        current_camera_name = cam_name
+                        if CAMERA_SWITCH_SOUND:
+                            CAMERA_SWITCH_SOUND.play()
+                        click_once = False
+                        break
+            else:
+                    # Klick in Letterbox/Pillarbox ignorieren
+                click_once = False
 
-
-        click_once = False
 
         # draw .............................................................................................................................................................................
         SCREEN.fill((10,10,10))
@@ -1621,13 +1610,19 @@ def main():
                 # end menu / quit
                 running = False
 
-        mx, my = pygame.mouse.get_pos()
-        draw_camera_hover_bar(SCREEN, my, dt)
+        # Maus aus dem Fenster auf virtuelle 1920x1080-Koordinaten mappen
+        vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos())
+
+        # Untere Kamera-Hover-Bar
+        draw_camera_hover_bar(SCREEN, vmy, dt)
+
+        # Rechte Map-Hover-Bar
         if camera_active:
-            draw_map_hover_bar(SCREEN, my, dt)
+            draw_map_hover_bar(SCREEN, vmy, dt)
 
-
+        # Frame ausgeben
         present()
+
 
     pygame.quit()
     sys.exit()
