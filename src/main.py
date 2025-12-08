@@ -8,6 +8,8 @@ from moviepy.editor import VideoFileClip
 from PIL import Image
 from animatronic import Animatronic, ANIMATRONIC_PATHS, GameContext
 import time
+from render import present, window_to_virtual, apply_aspect, draw_ui, draw_camera_overlay, create_scanline_surface, draw_camera_hover_bar, draw_map_hover_bar
+
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -90,49 +92,6 @@ pygame.display.set_caption("Fünf Nächte beim Drachen")
 
 # Offscreen-Renderziel in 1920x1080: DARAUF zeichnet das ganze Spiel!
 SCREEN = pygame.Surface((VIRTUAL_W, VIRTUAL_H)).convert()
-
-def present():
-    """Skaliert die 1920x1080-Offscreenfläche verlustfrei auf WINDOW und letterboxt."""
-    w, h = WINDOW.get_size()
-    scale = min(w / VIRTUAL_W, h / VIRTUAL_H)
-    sw, sh = int(VIRTUAL_W * scale), int(VIRTUAL_H * scale)
-    x, y = (w - sw) // 2, (h - sh) // 2
-    frame = pygame.transform.smoothscale(SCREEN, (sw, sh))
-    WINDOW.fill((0, 0, 0))
-    WINDOW.blit(frame, (x, y))
-    pygame.display.flip()
-
-
-
-
-def window_to_virtual(pos):
-    """
-    Mappt Fensterkoords (Maus) auf die virtuelle 1920x1080-Renderfläche.
-    Rückgabe: (vx, vy, inside):
-      vx, vy  ... Maus in virtuellen Koordinaten
-      inside  ... True, wenn Maus im sichtbaren Frame liegt (ohne Letterbox-Balken)
-    """
-    mx, my = pos
-    w, h = WINDOW.get_size()
-    scale = min(w / VIRTUAL_W, h / VIRTUAL_H)
-    sw, sh = int(VIRTUAL_W * scale), int(VIRTUAL_H * scale)
-    ox, oy = (w - sw) // 2, (h - sh) // 2  # Offsets durch Letterbox/Pillarbox
-
-    inside = (ox <= mx < ox + sw) and (oy <= my < oy + sh)
-    vx = (mx - ox) / scale
-    vy = (my - oy) / scale
-    return int(vx), int(vy), inside
-
-
-
-def apply_aspect(mode: str):
-    """
-    Setzt das Fenster neu im gewünschten Seitenverhältnis.
-    """
-    global ASPECT_MODE, WINDOW, WINDOW_W, WINDOW_H
-    ASPECT_MODE = mode
-    WINDOW_W, WINDOW_H = compute_window_size(ASPECT_MODE)
-    WINDOW = pygame.display.set_mode((WINDOW_W, WINDOW_H), pygame.RESIZABLE)
    
 
 
@@ -186,14 +145,6 @@ CAM_MAP_BUTTON_POS = {
 static_alpha = 0         # current opacity
 static_target_alpha = 0  # desired opacity (e.g. 100 when active)
 static_fade_speed = 300  # how fast the fade occurs (alpha per second)
-
-def create_scanline_surface(width, height):
-    surf = pygame.Surface((width, height)).convert()
-    surf.fill((0, 0, 0))
-    for y in range(0, height, 4):
-        pygame.draw.line(surf, (10, 10, 10), (0, y), (width, y), 2)
-    surf.set_alpha(40)
-    return surf
 
 SCANLINE_OVERLAY = create_scanline_surface(WIDTH, HEIGHT)
 
@@ -433,7 +384,7 @@ def draw_map_camera_buttons(surface, map_x, map_y):
 
     btn_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 28)
 
-    vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos())
+    vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos(), WINDOW, VIRTUAL_W, VIRTUAL_H)
 
     for cam_name, data in CAM_MAP_BUTTON_POS.items():
         px, py = data["pos"]
@@ -489,7 +440,7 @@ def draw_map_overlay(surface):
     surface.blit(txt, (bottom_rect.centerx - txt.get_width() // 2, bottom_rect.centery - txt.get_height() // 2))
 
     # -------- Cam-Buttons (mit virtueller Maus) --------
-    vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos())
+    vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos(), WINDOW, VIRTUAL_W, VIRTUAL_H)
     btn_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 28)
 
     for cam_name, data in CAM_MAP_BUTTON_POS.items():
@@ -571,126 +522,6 @@ jumpscare_time = 0.0
 NIGHT_LENGTH = 450  # 7 minutes 30 seconds like FNaF
 night_timer = NIGHT_LENGTH
 start_ticks = pygame.time.get_ticks()
-
-# ----- Helper UI -----
-def draw_ui():
-    """Draw FNaF-style status UI (night timer, door status, power)."""
-    try:
-        ui_font = pygame.font.Font("../assets/fonts/pixel_font.ttf", 26)
-    except:
-        ui_font = FONT  # fallback if pixel font missing
-
-    # --- Background translucent panel ---
-    panel = pygame.Surface((280, 100), pygame.SRCALPHA)
-    panel.fill((10, 10, 10, 120))
-    SCREEN.blit(panel, (WIDTH - 300, 15))
-
-    info_x = WIDTH - 280
-    info_y = 25
-
-    # --- Night timer ---
-    timer_text = ui_font.render(f"TIME LEFT: {int(night_timer)}s", True, (220, 220, 220))
-    SCREEN.blit(timer_text, (info_x, info_y))
-    info_y += 28
-
-    # --- Door status ---
-    door_text = "CLOSED" if is_door_closed_between("Hall", "Office") else "OPEN"
-    door_color = (255, 60, 60) if door_text == "CLOSED" else (100, 255, 100)
-    door_label = ui_font.render(f"DOOR: {door_text}", True, door_color)
-    SCREEN.blit(door_label, (info_x, info_y))
-    info_y += 28
-
-    # --- Power ---
-    if power > 20:
-        power_color = (220, 220, 220)
-    else:
-        power_color = (255, 50, 50)
-    power_label = ui_font.render(f"POWER: {power:.0f}%", True, power_color)
-    SCREEN.blit(power_label, (info_x, info_y))
-
-    # --- Subtle glow/flicker effect (optional aesthetic) ---
-    if random.random() < 0.02:
-        flicker_overlay = pygame.Surface((280, 100), pygame.SRCALPHA)
-        flicker_overlay.fill((255, 255, 255, random.randint(10, 20)))
-        SCREEN.blit(flicker_overlay, (WIDTH - 300, 15))
-
-
-
-
-def draw_camera_hover_bar(screen, mouse_y, dt):
-    """
-    Camera-Hover-Bar am unteren Rand.
-    Hinweis: 'mouse_y' wird NICHT mehr direkt verwendet; wir mappen die Fenstermaus
-    selbst auf virtuelle 1920x1080-Koordinaten, damit Hover/Toggles nicht off-center sind.
-    """
-    global camera_active, camera_bar_y, camera_bar_target_y
-    global last_hover_state, cam_toggle_cooldown, static_target_alpha
-
-    # --- virtuelle Maus holen (aus dem Fenster gemappt) ---
-    vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos())
-
-    bar_height = 80
-    hover_zone = HEIGHT - 120        # virtuelle Koordinate (1920x1080)
-    toggle_cooldown_time = 0.4       # Prevent double triggers
-
-    # initialize missing globals
-    if "last_hover_state" not in globals():
-        last_hover_state = False
-    if "cam_toggle_cooldown" not in globals():
-        cam_toggle_cooldown = 0.0
-
-    # update cooldown
-    if cam_toggle_cooldown > 0:
-        cam_toggle_cooldown -= dt
-
-    # detect hover – NUR wenn Maus im sichtbaren Frame liegt (nicht in den schwarzen Balken)
-    hovering = bool(inside) and (vmy >= hover_zone)
-
-    # --- FNaF toggle logic ---
-    if hovering and not last_hover_state and cam_toggle_cooldown <= 0:
-        # Toggle camera
-        camera_active = not camera_active
-        cam_toggle_cooldown = toggle_cooldown_time
-
-        if camera_active:
-            static_target_alpha = 120
-            print("[CAM] Monitor OPENED")
-
-            # Play camera open sound on dedicated channel
-            if CAM_OPEN_SOUND:
-                CAM_OPEN_CHANNEL.play(CAM_OPEN_SOUND)
-        else:
-            static_target_alpha = 0
-            print("[CAM] Monitor CLOSED")
-            # Stop open sound immediately
-            CAM_OPEN_CHANNEL.stop()
-
-    # update last state
-    last_hover_state = hovering
-
-    # slide animation (virtuell)
-    camera_bar_target_y = HEIGHT - (bar_height if camera_active else 20)
-    camera_bar_y += (camera_bar_target_y - camera_bar_y) * min(dt * 10, 1)
-
-    # draw bar background (virtuell)
-    bar_rect = pygame.Rect(0, camera_bar_y, WIDTH, bar_height)
-    pygame.draw.rect(screen, (25, 25, 25), bar_rect)
-
-    # draw arrow
-    arrow_y = camera_bar_y + 25
-    arrow_color = (255, 80, 80) if camera_active else (220, 220, 220)
-    pygame.draw.polygon(screen, arrow_color, [
-        (WIDTH // 2 - 35, arrow_y + 20),
-        (WIDTH // 2 + 35, arrow_y + 20),
-        (WIDTH // 2, arrow_y)
-    ])
-
-    # glow on hover
-    if hovering:
-        glow = pygame.Surface((WIDTH, bar_height), pygame.SRCALPHA)
-        glow.fill((255, 255, 255, 20))
-        screen.blit(glow, (0, camera_bar_y))
-
 
 
 def mouse_in_camera_ui(mx, my):
@@ -875,7 +706,7 @@ def main_menu():
             SCREEN.blit(SCANLINE_OVERLAY, (0, 0))
 
         
-        vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos())
+        vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos(), WINDOW, VIRTUAL_W, VIRTUAL_H)
 
         if inside:
             mx, my = vmx, vmy
@@ -921,7 +752,7 @@ def main_menu():
                     if back_rect.collidepoint(mx, my):
                         in_controls_menu = False
 
-            present()
+            present(SCREEN, WINDOW, VIRTUAL_W, VIRTUAL_H)
             continue  # bleibt IM while-running-Loop
 
         # -------- GRAPHICS SCREEN (NEU) --------
@@ -958,7 +789,7 @@ def main_menu():
                     elif aspect_1610_rect.collidepoint(mx, my):
                         apply_aspect('16:10')
 
-            present()
+            present(SCREEN, WINDOW, VIRTUAL_W, VIRTUAL_H)
             continue  # bleibt IM while-running-Loop
 
         # -------- MAIN MENU SCREEN --------
@@ -994,7 +825,7 @@ def main_menu():
                 elif quit_rect.collidepoint(mx, my):
                     pygame.quit(); sys.exit()
 
-        present()
+        present(SCREEN, WINDOW, VIRTUAL_W, VIRTUAL_H)
 
     if menu_music:
         menu_music.fadeout(1500)
@@ -1006,91 +837,6 @@ map_hover_target_x = 0
 map_open = False
 map_cooldown = 0.0
 MAP_BAR_WIDTH = 60
-
-
-
-def draw_map_hover_bar(surface, mouse_y, dt):
-    """
-    Rechte Map-Hover-Bar, identisches Hover-/Toggle-Verhalten wie die Kamera-Tablet-Bar unten.
-    Signatur bleibt unverändert; 'mouse_y' wird intern nicht direkt verwendet.
-    Maus wird selbst aus Fensterkoords -> virtuelle 1920x1080 Koords gemappt.
-    """
-    global map_open, map_hover_y, map_hover_target_y
-    global map_toggle_cooldown, map_hover_state
-
-    BAR_W = 55
-    BAR_H = 200
-
-    # Virtuelle Zonen (in 1920x1080)
-    open_zone_x  = WIDTH - 80    # zum Öffnen rechts reinfahren
-    leave_zone_x = WIDTH - 260   # weit genug rausfahren, um schließen zu dürfen
-
-    cooldown_time = 0.35
-
-    # --- Maus virtualisieren & Sichtbarkeit checken ---
-    vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos())
-
-    # --- Init Globals (einmalig) ---
-    if "map_hover_state" not in globals():
-        map_hover_state = "idle"  # idle → opened → left → ready_to_close
-    if "map_toggle_cooldown" not in globals():
-        map_toggle_cooldown = 0.0
-    if "map_hover_y" not in globals():
-        map_hover_y = HEIGHT // 2 - BAR_H // 2
-    if "map_hover_target_y" not in globals():
-        map_hover_target_y = HEIGHT // 2 - BAR_H // 2
-
-    # --- Cooldown ---
-    if map_toggle_cooldown > 0:
-        map_toggle_cooldown -= dt
-
-    # Bar-Rechteck (virtuell)
-    bar_rect = pygame.Rect(WIDTH - BAR_W, map_hover_y, BAR_W, BAR_H)
-
-    # Hover gilt NUR, wenn Maus im sichtbaren Frame UND über dem Bar-Rechteck liegt
-    hovering = bool(inside) and bar_rect.collidepoint(vmx, vmy)
-
-    # --- Öffnen (erste Hover-Aktion rechts) ---
-    if map_hover_state == "idle":
-        if (inside and vmx >= open_zone_x) and (not map_open) and (map_toggle_cooldown <= 0):
-            map_open = True
-            map_hover_state = "opened"
-            map_toggle_cooldown = cooldown_time
-            print("[MAP] OPEN via hover")
-            if MAP_OPEN_SOUND:
-                MAP_OPEN_SOUND.play()
-
-    # --- Übergang: erst weit rausfahren, bevor schließen erlaubt ---
-    if map_hover_state == "opened" and inside and (vmx < leave_zone_x):
-        map_hover_state = "left"
-
-    # --- Schließen (zweite Hover-Aktion auf die Bar selbst) ---
-    if map_hover_state == "left":
-        if hovering and map_open and map_toggle_cooldown <= 0:
-            map_open = False
-            map_hover_state = "idle"
-            map_toggle_cooldown = cooldown_time
-            print("[MAP] CLOSE via re-hover")
-            if MAP_CLOSE_SOUND:
-                MAP_CLOSE_SOUND.play()
-
-    # --- Zeichnen der Bar (virtuell) ---
-    bar_rect = pygame.Rect(WIDTH - BAR_W, map_hover_y, BAR_W, BAR_H)
-    pygame.draw.rect(surface, (40, 90, 160), bar_rect, border_radius=12)
-
-    # Pfeil nach links (Klammern korrekt + eigener Zeilenumbruch)
-    pygame.draw.polygon(
-        surface,
-        (220, 240, 255),
-        [
-            (bar_rect.left + 12, bar_rect.centery),
-            (bar_rect.right - 12, bar_rect.centery - 20),
-            (bar_rect.right - 12, bar_rect.centery + 20),
-        ],
-    )
-
-
-
 
 
 
@@ -1141,11 +887,11 @@ def show_night_intro(screen, text="Night 1", duration=3.0):
         fade_surface.set_alpha(alpha)
         screen.blit(fade_surface, (0, 0))
 
-        present()
+        present(SCREEN, WINDOW, VIRTUAL_W, VIRTUAL_H)
 
     # after fade, transition back to black
     screen.fill((0, 0, 0))
-    present()
+    present(SCREEN, WINDOW, VIRTUAL_W, VIRTUAL_H)
     pygame.time.wait(500)
 
 pygame.mixer.set_num_channels(16)
@@ -1240,7 +986,7 @@ def main():
 
             # --- Then overlay the jumpscare frame with alpha ---
             SCREEN.blit(surf, (0, 0))
-            present()
+            present(SCREEN, WINDOW, VIRTUAL_W, VIRTUAL_H)
             clock.tick(30)
 
         clip.close()
@@ -1394,7 +1140,7 @@ def main():
                 for alpha in range(0, 255, 8):
                     fade_surface.set_alpha(alpha)
                     SCREEN.blit(fade_surface, (0, 0))
-                    present()
+                    present(SCREEN, WINDOW, VIRTUAL_W, VIRTUAL_H)
                     pygame.time.wait(20)
 
                 print("GAME OVER - Player jumpscared.")
@@ -1544,7 +1290,7 @@ def main():
 
 
 
-        draw_ui()
+        draw_ui(SCREEN, WIDTH, HEIGHT, night_timer, power, is_door_closed_between("Hall", "Office"))
 
         def draw_camera_overlay(surface, camera_name, booting=False):
             """Draw realistic FNaF-style camera overlay on top of the camera feed."""
@@ -1611,17 +1357,17 @@ def main():
                 running = False
 
         # Maus aus dem Fenster auf virtuelle 1920x1080-Koordinaten mappen
-        vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos())
+        vmx, vmy, inside = window_to_virtual(pygame.mouse.get_pos(), WINDOW, VIRTUAL_W, VIRTUAL_H)
 
         # Untere Kamera-Hover-Bar
-        draw_camera_hover_bar(SCREEN, vmy, dt)
+        draw_camera_hover_bar(SCREEN, WIDTH, HEIGHT, camera_active, camera_bar_y, camera_bar_target_y, dt)
 
         # Rechte Map-Hover-Bar
         if camera_active:
             draw_map_hover_bar(SCREEN, vmy, dt)
 
         # Frame ausgeben
-        present()
+        present(SCREEN, WINDOW, VIRTUAL_W, VIRTUAL_H)
 
 
     pygame.quit()
